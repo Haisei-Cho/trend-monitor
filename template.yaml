@@ -15,10 +15,6 @@ Parameters:
   StageName:
     Type: String
     Default: dev
-  XBearerToken:
-    Type: String
-    NoEcho: true
-    Description: X API bearer token stored into Secrets Manager by SAM deployment
   TrendWoeid:
     Type: Number
     Default: 23424856
@@ -66,13 +62,6 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  XBearerSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Description: Bearer token for X API access used by TrendFetcherFunction
-      SecretString: !Sub |
-        {"bearer_token":"${XBearerToken}"}
-
   MasterSeedFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -119,7 +108,7 @@ Resources:
           TABLE_NAME: !Ref TrendMasterTable
           STAGE: !Ref StageName
           BUCKET_NAME: !Ref TrendOutputBucket
-          SECRET_NAME: !Ref XBearerSecret
+          SECRET_NAME: !Sub trend-monitor/${StageName}/x-api-token
           WOEID: !Ref TrendWoeid
           MAX_TRENDS: !Ref MaxTrends
           SEARCH_MAX_RESULTS: !Ref SearchMaxResults
@@ -139,7 +128,7 @@ Resources:
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Ref XBearerSecret
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:trend-monitor/${StageName}/x-api-token*
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
@@ -158,9 +147,9 @@ Outputs:
   TrendOutputBucketName:
     Description: S3 bucket name for normalized trend output
     Value: !Ref TrendOutputBucket
-  XBearerSecretArn:
-    Description: Secrets Manager secret ARN holding X API bearer token
-    Value: !Ref XBearerSecret
+  XBearerSecretName:
+    Description: Secrets Manager secret name holding X API bearer token
+    Value: !Sub trend-monitor/${StageName}/x-api-token
   MasterSeedFunctionName:
     Description: Name of the custom resource function that seeds DynamoDB master data
     Value: !Ref MasterSeedFunction
