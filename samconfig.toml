@@ -4,6 +4,7 @@ version = 0.1
 
 [default.global.parameters]
 stack_name = "trend-monitor"
+region = "ap-northeast-1"
 
 [default.build.parameters]
 cached = true
@@ -16,6 +17,12 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+s3_prefix = "trend-monitor"
+region = "ap-northeast-1"
+profile = "pwc-session"
+disable_rollback = true
+parameter_overrides = "StageName=\"dev\" TrendWoeid=\"23424856\" MaxTrends=\"50\" SearchMaxResults=\"10\""
+image_repositories = []
 
 [default.package.parameters]
 resolve_s3 = true

@@ -5,9 +5,162 @@ Description: >
 
 Globals:
   Function:
-    Timeout: 3
+    Runtime: python3.13
+    Timeout: 60
+    MemorySize: 512
+    Architectures:
+      - x86_64
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  XBearerToken:
+    Type: String
+    NoEcho: true
+    Description: X API bearer token stored into Secrets Manager by SAM deployment
+  TrendWoeid:
+    Type: Number
+    Default: 23424856
+  MaxTrends:
+    Type: Number
+    Default: 50
+  SearchMaxResults:
+    Type: Number
+    Default: 10
 
 Resources:
+  TrendOutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
+  TrendMasterTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  XBearerSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Bearer token for X API access used by TrendFetcherFunction
+      SecretString: !Sub |
+        {"bearer_token":"${XBearerToken}"}
+
+  MasterSeedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: function/master_seed/
+      Handler: handler.handler
+      Description: Seeds the DynamoDB master table during stack create and update.
+      Timeout: 60
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TrendMasterTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:DeleteItem
+                - dynamodb:PutItem
+              Resource: !GetAtt TrendMasterTable.Arn
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+
+  SeedMasterData:
+    Type: Custom::SeedMasterData
+    Properties:
+      ServiceToken: !GetAtt MasterSeedFunction.Arn
+      TableName: !Ref TrendMasterTable
+      SeedVersion: 1
+
+  TrendFetcherFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - SeedMasterData
+    Properties:
+      CodeUri: function/trend_fetcher/
+      Handler: handler.handler
+      Description: Fetches X trends, screens them with Bedrock, and stores normalized output to S3.
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TrendMasterTable
+          STAGE: !Ref StageName
+          BUCKET_NAME: !Ref TrendOutputBucket
+          SECRET_NAME: !Ref XBearerSecret
+          WOEID: !Ref TrendWoeid
+          MAX_TRENDS: !Ref MaxTrends
+          SEARCH_MAX_RESULTS: !Ref SearchMaxResults
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !GetAtt TrendMasterTable.Arn
+                - !Sub ${TrendMasterTable.Arn}/index/*
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref XBearerSecret
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/jp.anthropic.claude-sonnet-4-6*
 
 Outputs:
+  TrendFetcherFunctionArn:
+    Description: ARN of the trend fetcher Lambda function
+    Value: !GetAtt TrendFetcherFunction.Arn
+  TrendFetcherFunctionName:
+    Description: Name of the trend fetcher Lambda function
+    Value: !Ref TrendFetcherFunction
+  TrendMasterTableName:
+    Description: DynamoDB table name for trend master data
+    Value: !Ref TrendMasterTable
+  TrendOutputBucketName:
+    Description: S3 bucket name for normalized trend output
+    Value: !Ref TrendOutputBucket
+  XBearerSecretArn:
+    Description: Secrets Manager secret ARN holding X API bearer token
+    Value: !Ref XBearerSecret
+  MasterSeedFunctionName:
+    Description: Name of the custom resource function that seeds DynamoDB master data
+    Value: !Ref MasterSeedFunction
