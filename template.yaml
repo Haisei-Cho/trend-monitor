@@ -1,31 +1,35 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  trend-monitor
+  trend-monitor - SCMリスク監視システム
 
 Globals:
   Function:
     Runtime: python3.13
-    Timeout: 60
+    Timeout: 900
     MemorySize: 512
     Architectures:
       - x86_64
+    Environment:
+      Variables:
+        POWERTOOLS_LOG_LEVEL: INFO
+        POWERTOOLS_LOGGER_LOG_EVENT: true
 
 Parameters:
   StageName:
     Type: String
     Default: dev
-  TrendWoeid:
-    Type: Number
-    Default: 23424856
-  MaxTrends:
-    Type: Number
-    Default: 50
+  SecretName:
+    Type: String
+    Default: trend-monitor/dev/x-api-token
   SearchMaxResults:
-    Type: Number
-    Default: 10
+    Type: String
+    Default: "10"
 
 Resources:
+  # -----------------------------------------------------------
+  # S3 Bucket（生データ保存）
+  # -----------------------------------------------------------
   TrendOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -33,8 +37,17 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireRawData
+            Prefix: raw/
+            Status: Enabled
+            ExpirationInDays: 90
 
-  TrendMasterTable:
+  # -----------------------------------------------------------
+  # DynamoDB Table（Single Table Design）
+  # -----------------------------------------------------------
+  TrendTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
@@ -46,6 +59,10 @@ Resources:
         - AttributeName: GSI1PK
           AttributeType: S
         - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
           AttributeType: S
       KeySchema:
         - AttributeName: PK
@@ -61,95 +78,139 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
-  MasterSeedFunction:
-    Type: AWS::Serverless::Function
+  # -----------------------------------------------------------
+  # SNS Topic（通知用）
+  # -----------------------------------------------------------
+  NotificationTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      CodeUri: function/master_seed/
-      Handler: handler.handler
-      Description: Seeds the DynamoDB master table during stack create and update.
-      Timeout: 60
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref TrendMasterTable
+      TopicName: !Sub trend-monitor-notification-${StageName}
+
+  # -----------------------------------------------------------
+  # Lambda Layer（共通ユーティリティ + 依存パッケージ）
+  # -----------------------------------------------------------
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: layers/common/
+      LayerName: !Sub trend-monitor-common-layers-${StageName}
+      RetentionPolicy: Delete
+      CompatibleRuntimes:
+        - python3.13
+    Metadata:
+      BuildMethod: python3.13
+
+  # -----------------------------------------------------------
+  # IAM Role: Lambda共通
+  # -----------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub trend-monitor-lambda-role-${StageName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:BatchWriteItem
-                - dynamodb:DeleteItem
-                - dynamodb:PutItem
-              Resource: !GetAtt TrendMasterTable.Arn
-            - Effect: Allow
-              Action:
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:PutLogEvents
-              Resource: '*'
+        - PolicyName: TrendMonitorPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                Resource:
+                  - !GetAtt TrendTable.Arn
+                  - !Sub ${TrendTable.Arn}/index/*
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}-*
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource:
+                  - arn:aws:bedrock:*::foundation-model/anthropic.claude-*
+                  - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*.anthropic.claude-*
 
-  SeedMasterData:
-    Type: Custom::SeedMasterData
-    Properties:
-      ServiceToken: !GetAtt MasterSeedFunction.Arn
-      TableName: !Ref TrendMasterTable
-      SeedVersion: 1
-
+  # -----------------------------------------------------------
+  # Lambda: Trend Fetcher（ルートA - トレンド線）
+  # -----------------------------------------------------------
   TrendFetcherFunction:
     Type: AWS::Serverless::Function
-    DependsOn:
-      - SeedMasterData
     Properties:
+      FunctionName: !Sub trend-fetcher-${StageName}
+      Handler: trend_fetcher_function.lambda_handler
       CodeUri: function/trend_fetcher/
-      Handler: handler.handler
-      Description: Fetches X trends, screens them with Bedrock, and stores normalized output to S3.
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
       Environment:
         Variables:
-          TABLE_NAME: !Ref TrendMasterTable
-          STAGE: !Ref StageName
           BUCKET_NAME: !Ref TrendOutputBucket
-          SECRET_NAME: !Sub trend-monitor/${StageName}/x-api-token
-          WOEID: !Ref TrendWoeid
-          MAX_TRENDS: !Ref MaxTrends
+          SECRET_NAME: !Ref SecretName
+          STAGE: !Ref StageName
           SEARCH_MAX_RESULTS: !Ref SearchMaxResults
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource:
-                - !GetAtt TrendMasterTable.Arn
-                - !Sub ${TrendMasterTable.Arn}/index/*
-            - Effect: Allow
-              Action:
-                - s3:PutObject
-              Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:trend-monitor/${StageName}/x-api-token*
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/jp.anthropic.claude-sonnet-4-6*
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: false
+
+  # -----------------------------------------------------------
+  # Lambda: Keyword Search（ルートB - キーワード線）
+  # -----------------------------------------------------------
+  KeywordSearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub keyword-search-${StageName}
+      Handler: keyword_search_function.lambda_handler
+      CodeUri: function/keyword_search/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TrendTable
+          BUCKET_NAME: !Ref TrendOutputBucket
+          SECRET_NAME: !Ref SecretName
+          STAGE: !Ref StageName
+          SEARCH_MAX_RESULTS: !Ref SearchMaxResults
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: false
 
 Outputs:
-  TrendFetcherFunctionArn:
-    Description: ARN of the trend fetcher Lambda function
-    Value: !GetAtt TrendFetcherFunction.Arn
-  TrendFetcherFunctionName:
-    Description: Name of the trend fetcher Lambda function
-    Value: !Ref TrendFetcherFunction
-  TrendMasterTableName:
-    Description: DynamoDB table name for trend master data
-    Value: !Ref TrendMasterTable
+  TrendTableName:
+    Value: !Ref TrendTable
   TrendOutputBucketName:
-    Description: S3 bucket name for normalized trend output
     Value: !Ref TrendOutputBucket
-  XBearerSecretName:
-    Description: Secrets Manager secret name holding X API bearer token
-    Value: !Sub trend-monitor/${StageName}/x-api-token
-  MasterSeedFunctionName:
-    Description: Name of the custom resource function that seeds DynamoDB master data
-    Value: !Ref MasterSeedFunction
+  TrendFetcherArn:
+    Value: !GetAtt TrendFetcherFunction.Arn
+  KeywordSearchArn:
+    Value: !GetAtt KeywordSearchFunction.Arn
+  NotificationTopicArn:
+    Value: !Ref NotificationTopic
