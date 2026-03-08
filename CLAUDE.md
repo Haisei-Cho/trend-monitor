@@ -1,4 +1,4 @@
-# SCMリスク監視システム (trend-monitor)
+﻿# SCMリスク監視システム (trend-monitor)
 
 ## プロジェクト概要
 
@@ -42,9 +42,7 @@ trend-monitor/
 - **コメント・docstring・変数名**: 日本語で書く
 - **Lambda handler ファイル名**: `{機能名}_function.py` (例: `trend_fetcher_function.py`)
 - **template.yaml の Handler**: `{機能名}_function.lambda_handler`
-- **`from __future__ import annotations`**: 使用しない (Python 3.13)
 - **シンプルさ優先**: 不要な抽象化・過剰なエラーハンドリングは追加しない
-- **argparse不使用**: CLIスクリプトは `sys.argv` で十分
 
 ## DynamoDB設計 (Single Table)
 

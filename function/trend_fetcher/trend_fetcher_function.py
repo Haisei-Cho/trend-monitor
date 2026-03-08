@@ -151,6 +151,7 @@ def fetch_trend_details(
 
         sample_tweets = [
             {
+                "id": tw.get("id", ""),
                 "text": tw.get("text", ""),
                 "author_id": tw.get("author_id", ""),
                 "created_at": tw.get("created_at", ""),
