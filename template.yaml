@@ -28,11 +28,12 @@ Parameters:
 
 Resources:
   # -----------------------------------------------------------
-  # S3 Bucket（生データ保存）
+  # S3 Bucket
   # -----------------------------------------------------------
   TrendOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
+      BucketName: !Sub trend-monitor-output-${StageName}-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
