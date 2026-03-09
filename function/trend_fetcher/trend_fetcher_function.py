@@ -114,10 +114,7 @@ def screen_trends_with_bedrock(trends: list[dict[str, Any]]) -> list[dict[str, A
 
     except Exception as e:
         logger.error(f"Bedrockスクリーニングエラー: {e}")
-        return [
-            {**t, "screening_reason": "Bedrockエラーのため未スクリーニング"}
-            for t in trends
-        ]
+        raise
 
 
 def fetch_trend_details(

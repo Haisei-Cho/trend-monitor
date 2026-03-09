@@ -151,6 +151,12 @@ Resources:
                 Resource:
                   - arn:aws:bedrock:*::foundation-model/anthropic.claude-*
                   - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*.anthropic.claude-*
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                  - aws-marketplace:ViewSubscriptions
+                Resource: '*'
 
   # -----------------------------------------------------------
   # Lambda: Trend Fetcher（ルートA - トレンド線）
