@@ -50,6 +50,7 @@ Resources:
   TrendTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: !Sub trend-monitor-${StageName}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: PK
