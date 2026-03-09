@@ -28,7 +28,7 @@ def serialize_json(data: Any, ensure_ascii: bool = False) -> str:
     return json.dumps(data, ensure_ascii=ensure_ascii)
 
 
-X_API_QUERY_MAX_LENGTH = 1024
+X_API_QUERY_MAX_LENGTH = 512  # Basic/Pro tier: 512文字制限
 
 
 def build_query(
@@ -38,10 +38,10 @@ def build_query(
 ) -> list[str]:
     """
     X API Search Recent用のクエリ文字列を構築する。
-    1024文字を超える場合は拠点KWを分割して複数クエリを返す。
+    512文字（Basic/Pro tier制限）を超える場合は拠点KWを分割して複数クエリを返す。
 
     Returns:
-        list[str]: 1024文字以内のクエリリスト
+        list[str]: 512文字以内のクエリリスト
 
     Raises:
         ValueError: リスクキーワードまたは拠点キーワードが空の場合
@@ -57,14 +57,14 @@ def build_query(
         suffix_parts.append("-(" + " OR ".join(exclude_rules) + ")")
     suffix = " ".join(suffix_parts)
 
-    # 1024文字以内なら分割不要
+    # 512文字以内なら分割不要
     site_part = "(" + " OR ".join(site_keywords) + ")"
     single = f"{risk_part} {site_part} {suffix}"
     if len(single) <= X_API_QUERY_MAX_LENGTH:
         return [single]
 
-    # 拠点KWを分割: overhead = risk_part + " " + "(" + ")" + " " + suffix
-    overhead = len(risk_part) + 1 + 2 + 1 + len(suffix)
+    # 拠点KWを分割: overhead = risk_part + " (" + site_content + ") " + suffix
+    overhead = len(risk_part) + 1 + 1 + 1 + 1 + len(suffix)
     max_content = X_API_QUERY_MAX_LENGTH - overhead
 
     chunks: list[list[str]] = []
