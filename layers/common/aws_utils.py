@@ -15,6 +15,15 @@ from log_utils import setup_logger
 
 logger = setup_logger("aws_utils")
 
+# X API Search Recent で安全に使うAPI層フィルタだけを許可する
+SUPPORTED_SEARCH_API_FILTERS = {
+    "-is:retweet",
+    "-is:reply",
+    "-is:quote",
+    "-has:links",
+    "-has:media",
+}
+
 # AWSクライアント（Lambda実行時に1回だけ初期化）
 s3_client = boto3.client("s3")
 secrets_client = boto3.client("secretsmanager")
@@ -45,6 +54,85 @@ def get_today_start_time() -> str:
     """当日0時(JST)をUTC ISO8601形式で返す。"""
     today_start = datetime.now(JST).replace(hour=0, minute=0, second=0, microsecond=0)
     return today_start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _normalize_terms(terms: list[str] | None) -> list[str]:
+    """空文字を除去しつつ順序を保って重複排除する。"""
+    if not terms:
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        value = term.strip()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
+
+
+def load_x_api_query_filters(table_name: str) -> tuple[list[str], list[str]]:
+    """DynamoDBの除外ルールから除外KWとAPIフィルタを取得する。"""
+    exclude_keywords: list[str] = []
+    api_filters: list[str] = []
+
+    for item in query_gsi1(table_name, "TYPE#EXCLUSION"):
+        exclude_keywords.extend(item.get("keywords", []))
+        api_filter = item.get("apiFilter", "").strip()
+        if api_filter:
+            api_filters.append(api_filter)
+
+    return _normalize_terms(exclude_keywords), _normalize_terms(api_filters)
+
+
+def filter_supported_search_api_filters(api_filters: list[str] | None) -> list[str]:
+    """Search Recentで使えるAPIフィルタだけを残す。"""
+    normalized = _normalize_terms(api_filters)
+    unsupported = [
+        value for value in normalized
+        if not value.startswith("-(") and value not in SUPPORTED_SEARCH_API_FILTERS
+    ]
+    if unsupported:
+        logger.warning(
+            "Search Recent非対応のAPIフィルタを除外: %s",
+            ", ".join(unsupported),
+        )
+
+    return [
+        value for value in normalized
+        if value.startswith("-(") or value in SUPPORTED_SEARCH_API_FILTERS
+    ]
+
+
+def apply_x_api_query_filters(
+    base_query: str,
+    exclude_keywords: list[str] | None = None,
+    api_filters: list[str] | None = None,
+    lang: str = "ja",
+) -> str:
+    """X API検索クエリに共通フィルタを付与する。"""
+    query = base_query.strip()
+    suffixes: list[str] = []
+
+    lang_filter = f"lang:{lang}"
+    if lang_filter not in query:
+        suffixes.append(lang_filter)
+
+    normalized_api_filters = filter_supported_search_api_filters(api_filters)
+    for api_filter in normalized_api_filters:
+        if api_filter not in query:
+            suffixes.append(api_filter)
+
+    normalized_keywords = _normalize_terms(exclude_keywords)
+    if normalized_keywords:
+        exclusion_clause = "-(" + " OR ".join(normalized_keywords) + ")"
+        if exclusion_clause not in query:
+            suffixes.append(exclusion_clause)
+
+    if not suffixes:
+        return query
+    return f"{query} {' '.join(suffixes)}"
 
 
 def save_to_s3(items: list[dict[str, Any]], source: str) -> str:

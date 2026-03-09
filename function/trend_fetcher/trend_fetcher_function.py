@@ -16,13 +16,20 @@ from typing import Any
 import boto3
 from xdk import Client
 
-from aws_utils import get_bearer_token, get_today_start_time, save_to_s3
+from aws_utils import (
+    apply_x_api_query_filters,
+    get_bearer_token,
+    get_today_start_time,
+    load_x_api_query_filters,
+    save_to_s3,
+)
 from log_utils import setup_logger
 
 logger = setup_logger("trend_fetcher")
 
 bedrock_runtime = boto3.client("bedrock-runtime")
 
+TABLE_NAME = os.environ["TABLE_NAME"]
 SEARCH_MAX_RESULTS = int(os.environ.get("SEARCH_MAX_RESULTS", "10"))
 WOEID = 23424856  # 日本
 MAX_TRENDS = 50
@@ -120,6 +127,8 @@ def screen_trends_with_bedrock(trends: list[dict[str, Any]]) -> list[dict[str, A
 def fetch_trend_details(
     client: Client,
     screened_trends: list[dict[str, Any]],
+    exclude_keywords: list[str],
+    api_filters: list[str],
 ) -> list[dict[str, Any]]:
     """スクリーニング通過トレンドごとにsearch_recentで詳細ツイートを取得する。"""
     if not screened_trends:
@@ -130,7 +139,11 @@ def fetch_trend_details(
 
     for trend in screened_trends:
         trend_name = trend["trend_name"]
-        query = f"{trend_name} lang:ja -is:retweet"
+        query = apply_x_api_query_filters(
+            trend_name,
+            exclude_keywords=exclude_keywords,
+            api_filters=api_filters,
+        )
         tweets = []
 
         try:
@@ -182,6 +195,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
     bearer_token = get_bearer_token()
     client = Client(bearer_token=bearer_token)
+    exclude_keywords, api_filters = load_x_api_query_filters(TABLE_NAME)
+    api_filters = [value for value in api_filters if not value.startswith("-(")]
 
     # 1. トレンド取得
     trends = fetch_trends(client)
@@ -190,7 +205,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     screened = screen_trends_with_bedrock(trends)
 
     # 3. スクリーニング通過トレンドの詳細ツイート取得
-    items = fetch_trend_details(client, screened)
+    items = fetch_trend_details(client, screened, exclude_keywords, api_filters)
 
     # 4. S3保存
     s3_key = save_to_s3(items, source="trends_route")

@@ -14,7 +14,14 @@ from typing import Any
 
 from xdk import Client
 
-from aws_utils import get_bearer_token, get_today_start_time, save_to_s3, query_gsi1
+from aws_utils import (
+    apply_x_api_query_filters,
+    get_bearer_token,
+    get_today_start_time,
+    load_x_api_query_filters,
+    query_gsi1,
+    save_to_s3,
+)
 from log_utils import setup_logger
 from utils import build_query
 
@@ -24,11 +31,11 @@ TABLE_NAME = os.environ["TABLE_NAME"]
 SEARCH_MAX_RESULTS = int(os.environ.get("SEARCH_MAX_RESULTS", "10"))
 
 
-def get_master_data() -> tuple[dict[str, list[str]], list[str], list[str]]:
+def get_master_data() -> tuple[dict[str, list[str]], list[str], list[str], list[str]]:
     """DynamoDBからマスタデータを取得する。
 
     Returns:
-        tuple: (カテゴリID別リスクKW, 拠点KW, 除外KW)
+        tuple: (カテゴリID別リスクKW, 拠点KW, 除外KW, APIフィルタ)
     """
     # リスクキーワード
     risk_kw: dict[str, list[str]] = {}
@@ -44,15 +51,14 @@ def get_master_data() -> tuple[dict[str, list[str]], list[str], list[str]]:
     site_kw = sorted(set(site_kw))
 
     # 除外ルール
-    exc_kw: list[str] = []
-    for item in query_gsi1(TABLE_NAME, "TYPE#EXCLUSION"):
-        exc_kw.extend(item.get("keywords", []))
+    exc_kw, api_filters = load_x_api_query_filters(TABLE_NAME)
+    api_filters = [value for value in api_filters if not value.startswith("-(")]
 
     logger.info(
         f"マスタデータ取得: リスク={len(risk_kw)}カテゴリ, "
-        f"拠点={len(site_kw)}件, 除外={len(exc_kw)}件"
+        f"拠点={len(site_kw)}件, 除外KW={len(exc_kw)}件, APIフィルタ={len(api_filters)}件"
     )
-    return risk_kw, site_kw, exc_kw
+    return risk_kw, site_kw, exc_kw, api_filters
 
 
 def fetch_keyword_hits(
@@ -60,6 +66,7 @@ def fetch_keyword_hits(
     risk_kw: dict[str, list[str]],
     site_kw: list[str],
     exc_kw: list[str],
+    api_filters: list[str],
 ) -> list[dict[str, Any]]:
     """リスクKW×拠点KWでsearch_recentを実行し、キーワードヒットを取得する。"""
     if not risk_kw or not site_kw:
@@ -73,7 +80,11 @@ def fetch_keyword_hits(
 
     for category_id, keywords in risk_kw.items():
         try:
-            queries = build_query(keywords, site_kw, exc_kw if exc_kw else None)
+            base_queries = build_query(keywords, site_kw, exc_kw if exc_kw else None)
+            queries = [
+                apply_x_api_query_filters(query, api_filters=api_filters)
+                for query in base_queries
+            ]
         except ValueError as e:
             logger.warning(f"クエリ構築エラー（{category_id}）: {e}")
             continue
@@ -132,9 +143,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
     bearer_token = get_bearer_token()
     client = Client(bearer_token=bearer_token)
 
-    risk_kw, site_kw, exc_kw = get_master_data()
+    risk_kw, site_kw, exc_kw, api_filters = get_master_data()
 
-    items = fetch_keyword_hits(client, risk_kw, site_kw, exc_kw)
+    items = fetch_keyword_hits(client, risk_kw, site_kw, exc_kw, api_filters)
 
     s3_key = save_to_s3(items, source="keyword_route")
 
