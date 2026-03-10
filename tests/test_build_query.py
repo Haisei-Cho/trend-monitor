@@ -90,11 +90,11 @@ class TestBuildQueryBasic:
 
     def test_simple_query(self):
         queries = build_query(["地震"], ["豊田市"])
-        assert queries == ["(地震) (豊田市) lang:ja -is:retweet"]
+        assert queries == ["(地震) (豊田市) lang:ja"]
 
     def test_with_exclusion(self):
         queries = build_query(["地震"], ["豊田市"], ["ゲーム", "アニメ"])
-        assert queries == ["(地震) (豊田市) lang:ja -is:retweet -(ゲーム OR アニメ)"]
+        assert queries == ["(地震) (豊田市) lang:ja -(ゲーム OR アニメ)"]
 
     def test_empty_risk_raises(self):
         with pytest.raises(ValueError):
@@ -118,7 +118,7 @@ class TestBuildQueryAllCategories:
                 # 基本構造の検証
                 assert query.startswith("(")
                 assert "lang:ja" in query
-                assert "-is:retweet" in query
+                assert "is:retweet" in query  # 除外ルール経由で含まれる
 
                 # リスクキーワードが含まれている
                 for kw in keywords:

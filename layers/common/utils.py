@@ -31,6 +31,14 @@ def serialize_json(data: Any, ensure_ascii: bool = False) -> str:
 X_API_QUERY_MAX_LENGTH = 512  # Basic/Pro tier: 512文字制限
 
 
+def build_search_suffix(exclude_keywords: list[str] | None = None) -> str:
+    """検索クエリの共通サフィックス（lang:ja + 除外ルール）を構築する。"""
+    parts = ["lang:ja"]
+    if exclude_keywords:
+        parts.append("-(" + " OR ".join(exclude_keywords) + ")")
+    return " ".join(parts)
+
+
 def build_query(
     risk_keywords: list[str],
     site_keywords: list[str],
@@ -52,10 +60,7 @@ def build_query(
         raise ValueError("拠点キーワードは少なくとも1つ必要です")
 
     risk_part = "(" + " OR ".join(risk_keywords) + ")"
-    suffix_parts = ["lang:ja", "-is:retweet"]
-    if exclude_rules:
-        suffix_parts.append("-(" + " OR ".join(exclude_rules) + ")")
-    suffix = " ".join(suffix_parts)
+    suffix = build_search_suffix(exclude_rules)
 
     # 512文字以内なら分割不要
     site_part = "(" + " OR ".join(site_keywords) + ")"
