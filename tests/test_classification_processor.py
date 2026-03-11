@@ -20,6 +20,7 @@ from classification_processor_function import (  # noqa: E402
     build_stage2_result,
     determine_final_label,
     lambda_handler,
+    normalize_score_for_evidence,
 )
 
 
@@ -33,6 +34,8 @@ PLANTS = {
         "Japan",
         ["PLT008", "Sendai Plant", "Sendai", "Miyagi"],
         ["Sensor Module", "Battery Module"],
+        ["Battery Module"],
+        ["Sensor Module"],
     ),
     "PLT009": SupplyNode(
         "PLT009",
@@ -43,6 +46,8 @@ PLANTS = {
         "Japan",
         ["PLT009", "Yokohama Plant", "Yokohama", "Kanagawa"],
         ["Finished Unit", "Motor Unit"],
+        ["Finished Unit"],
+        ["Motor Unit"],
     ),
 }
 
@@ -59,12 +64,45 @@ WAREHOUSES = {
 }
 
 T1_SUPPLIERS = {
-    "SUP003": SupplyNode("SUP003", "supplier", "Iwate Metals", "", "Iwate", "Japan", ["SUP003", "Iwate Metals", "Iwate"]),
-    "SUP007": SupplyNode("SUP007", "supplier", "Kanagawa Components", "", "Kanagawa", "Japan", ["SUP007", "Kanagawa Components", "Kanagawa"]),
+    "SUP003": SupplyNode(
+        "SUP003",
+        "supplier",
+        "Iwate Metals",
+        "",
+        "Iwate",
+        "Japan",
+        ["SUP003", "Iwate Metals", "Iwate"],
+        ["Battery Module", "Raw Resin"],
+        ["Battery Module"],
+        ["Raw Resin"],
+    ),
+    "SUP007": SupplyNode(
+        "SUP007",
+        "supplier",
+        "Kanagawa Components",
+        "",
+        "Kanagawa",
+        "Japan",
+        ["SUP007", "Kanagawa Components", "Kanagawa"],
+        ["Motor Unit"],
+        ["Motor Unit"],
+        [],
+    ),
 }
 
 T2_SUPPLIERS = {
-    "SUP102": SupplyNode("SUP102", "supplier", "Hokuriku Resin", "", "Ishikawa", "Japan", ["SUP102", "Hokuriku Resin", "Ishikawa"]),
+    "SUP102": SupplyNode(
+        "SUP102",
+        "supplier",
+        "Hokuriku Resin",
+        "",
+        "Ishikawa",
+        "Japan",
+        ["SUP102", "Hokuriku Resin", "Ishikawa"],
+        ["Raw Resin"],
+        ["Raw Resin"],
+        [],
+    ),
 }
 
 CONTEXT = SupplyChainContext(
@@ -114,6 +152,80 @@ def test_stage2_matches_plant_by_product():
 
     assert "PLT008" in result["candidate_plants"]
     assert result["matched_plants"][0]["matched_products"] == ["Battery Module"]
+    assert result["matched_plants"][0]["matched_produced_products"] == ["Battery Module"]
+    assert result["matched_plants"][0]["matched_consumed_products"] == []
+
+
+def test_produced_product_hit_scores_higher_than_consumed_product_hit():
+    supplier_result = build_stage2_result(
+        {
+            "trend_name": "Battery module output stopped",
+            "source": "trends_route",
+            "sample_tweets": [{"text": "Iwate Metals battery module line stopped."}],
+        },
+        "Iwate Metals battery module line stopped.",
+        CONTEXT,
+    )
+    plant_result = build_stage2_result(
+        {
+            "trend_name": "Sensor module shortage",
+            "source": "trends_route",
+            "sample_tweets": [{"text": "Sendai Plant is short on Sensor Module input."}],
+        },
+        "Sendai Plant is short on Sensor Module input.",
+        CONTEXT,
+    )
+
+    supplier_match = next(match for match in supplier_result["matched_t1_suppliers"] if match["node_id"] == "SUP003")
+    plant_match = next(match for match in plant_result["matched_plants"] if match["node_id"] == "PLT008")
+
+    assert supplier_match["matched_produced_products"] == ["Battery Module"]
+    assert supplier_match["matched_consumed_products"] == []
+    assert plant_match["matched_produced_products"] == []
+    assert plant_match["matched_consumed_products"] == ["Sensor Module"]
+    assert supplier_match["score"] > plant_match["score"]
+
+
+def test_high_authenticity_event_without_direct_node_match_still_goes_to_ai():
+    item = {
+        "trend_name": "Gasoline price surge",
+        "tweet_count": 10,
+        "source": "trends_route",
+        "sample_tweets": [
+            {"text": "Gasoline prices surged again and logistics costs are rising.", "author_id": "a1"},
+            {"text": "Fuel costs are hitting transport and manufacturing nationwide.", "author_id": "a2"},
+            {"text": "Gasoline and energy prices are rising sharply. https://example.com", "author_id": "a3"},
+        ],
+    }
+
+    result = build_stage2_result(item, "Gasoline prices surged again and logistics costs are rising.", CONTEXT)
+
+    assert result["candidate_plants"] == []
+    assert result["candidate_t1_suppliers"] == []
+    assert result["candidate_t2_suppliers"] == []
+    assert result["ai_candidate"] is True
+
+
+def test_low_evidence_ai_result_without_impacted_nodes_gets_capped():
+    stage3 = normalize_score_for_evidence({
+        "score": 58,
+        "used_ai": True,
+        "reason": "交通事故・道路障害を示す語句: 事故, 遅延, 交通障害, 道路",
+        "impacted_plants": [],
+        "impacted_suppliers": [],
+    })
+    assert stage3["score"] == 25
+
+
+def test_indirect_ai_rationale_without_impacted_nodes_can_keep_moderate_score():
+    stage3 = normalize_score_for_evidence({
+        "score": 72,
+        "used_ai": True,
+        "reason": "燃料高騰により物流コストと石化系部材コストが上昇し、間接的にサプライチェーンへ影響する可能性がある",
+        "impacted_plants": [],
+        "impacted_suppliers": [],
+    })
+    assert stage3["score"] == 55
 
 
 def test_determine_final_label():

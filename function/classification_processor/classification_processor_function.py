@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import unquote_plus
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 from aws_utils import load_json_from_s3, query_index, save_json_to_s3
 from log_utils import setup_logger
@@ -31,6 +32,14 @@ AI_SYSTEM_PROMPT = """You classify supply-chain event records.
 
 Use only the provided event text and supply-chain context.
 Prefer conservative scoring when evidence is weak.
+You may infer indirect impact even when plants or suppliers are not named explicitly.
+Indirect inference is allowed when the event plausibly affects:
+- transportation or fuel cost
+- energy-intensive manufacturing
+- petrochemical or metal-related inputs implied by product names
+- upstream/downstream supply continuity
+If indirect evidence is weak, keep score moderate and explain the inference clearly.
+If you cannot identify any impacted plant or supplier, keep the score low unless there is a clear indirect supply-chain rationale.
 Return JSON only.
 
 Return shape:
@@ -49,6 +58,14 @@ Return shape:
   ]
 }
 """
+
+GENERIC_REASON_PATTERNS = [
+    "として分類",
+    "検出",
+    "monitor",
+    "監視",
+    "一致は弱く",
+]
 
 
 @dataclass(slots=True)
@@ -83,6 +100,8 @@ class SupplyNode:
     country: str
     keywords: list[str]
     products: list[str] = field(default_factory=list)
+    produced_products: list[str] = field(default_factory=list)
+    consumed_products: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -145,9 +164,26 @@ def get_upstream_node_ids(target_id: str, prefix: str | None = None) -> list[str
     return unique_preserving_order([node_id for node_id in node_ids if node_id])
 
 
-def build_product_records() -> tuple[dict[str, str], dict[str, list[str]]]:
+def query_node_relation_items(node_id: str, sk_prefix: str) -> list[dict[str, Any]]:
+    table = boto3.resource("dynamodb").Table(SUPPLY_CHAIN_TABLE_NAME)
+    items: list[dict[str, Any]] = []
+    params = {
+        "KeyConditionExpression": Key("pk").eq(node_id) & Key("sk").begins_with(sk_prefix),
+    }
+    while True:
+        response = table.query(**params)
+        items.extend(response.get("Items", []))
+        if "LastEvaluatedKey" not in response:
+            break
+        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    return items
+
+
+def build_product_records() -> tuple[dict[str, str], dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
     product_names: dict[str, str] = {}
     product_to_plants: dict[str, list[str]] = {}
+    node_to_produced_products: dict[str, list[str]] = {}
+    node_to_consumed_products: dict[str, list[str]] = {}
     for item in query_index(SUPPLY_CHAIN_TABLE_NAME, "GSI1", "gsi1pk", "product"):
         product_id = item.get("pk", "")
         if not product_id:
@@ -157,34 +193,110 @@ def build_product_records() -> tuple[dict[str, str], dict[str, list[str]]]:
         plant_ids = extract_string_list(item.get("plant_ids"))
         if plant_ids:
             product_to_plants[product_id] = unique_preserving_order(plant_ids)
-    return product_names, product_to_plants
+    for node_type in ("plant", "supplier"):
+        for item in query_index(SUPPLY_CHAIN_TABLE_NAME, "GSI1", "gsi1pk", node_type):
+            node_id = item.get("pk", "")
+            if not node_id:
+                continue
+            produced_product_ids = unique_preserving_order([
+                relation.get("product_id", "")
+                for relation in query_node_relation_items(node_id, "PRODUCES#")
+                if relation.get("product_id")
+            ])
+            consumed_product_ids = unique_preserving_order([
+                relation.get("product_id", "")
+                for relation in query_node_relation_items(node_id, "CONSUMES#")
+                if relation.get("product_id")
+            ])
+            if produced_product_ids:
+                node_to_produced_products[node_id] = produced_product_ids
+                if node_type == "plant":
+                    for product_id in produced_product_ids:
+                        product_to_plants.setdefault(product_id, []).append(node_id)
+            if consumed_product_ids:
+                node_to_consumed_products[node_id] = consumed_product_ids
+
+    product_to_plants = {
+        product_id: unique_preserving_order(plant_ids)
+        for product_id, plant_ids in product_to_plants.items()
+    }
+    return product_names, product_to_plants, node_to_produced_products, node_to_consumed_products
 
 
-def get_plant_products(item: dict[str, Any], product_names: dict[str, str], product_to_plants: dict[str, list[str]]) -> list[str]:
-    plant_id = item.get("pk", "")
-    product_ids = unique_preserving_order(
-        extract_string_list(item.get("product_ids"))
-        + extract_string_list(item.get("products"))
-        + extract_string_list(item.get("product_refs"))
-    )
-    if plant_id:
+def get_node_products(
+    item: dict[str, Any],
+    product_names: dict[str, str],
+    product_to_plants: dict[str, list[str]],
+    node_to_produced_products: dict[str, list[str]],
+    node_to_consumed_products: dict[str, list[str]],
+) -> tuple[list[str], list[str], list[str]]:
+    node_id = item.get("pk", "")
+    node_type = item.get("node_type", "")
+    produced_product_ids = []
+    consumed_product_ids = []
+
+    if node_id:
+        produced_product_ids.extend(node_to_produced_products.get(node_id, []))
+        consumed_product_ids.extend(node_to_consumed_products.get(node_id, []))
+
+    if node_type == "plant" and node_id:
         for product_id, plant_ids in product_to_plants.items():
-            if plant_id in plant_ids:
-                product_ids.append(product_id)
+            if node_id in plant_ids:
+                produced_product_ids.append(product_id)
+
+    fallback_product_ids: list[str] = []
+    if not produced_product_ids and not consumed_product_ids:
+        fallback_product_ids.extend(
+            extract_string_list(item.get("product_ids"))
+            + extract_string_list(item.get("products"))
+            + extract_string_list(item.get("product_refs"))
+        )
+
     product_labels = unique_preserving_order(
         extract_string_list(item.get("product_names"))
         + extract_string_list(item.get("product_labels"))
     )
-    resolved_names = [product_names[product_id] for product_id in unique_preserving_order(product_ids) if product_id in product_names]
-    return unique_preserving_order(product_labels + resolved_names)
+    produced_names = [
+        product_names[product_id]
+        for product_id in unique_preserving_order(produced_product_ids)
+        if product_id in product_names
+    ]
+    consumed_names = [
+        product_names[product_id]
+        for product_id in unique_preserving_order(consumed_product_ids)
+        if product_id in product_names
+    ]
+    fallback_names = [
+        product_names[product_id]
+        for product_id in unique_preserving_order(fallback_product_ids)
+        if product_id in product_names
+    ]
+
+    produced_products = unique_preserving_order(produced_names)
+    consumed_products = unique_preserving_order(consumed_names)
+    all_products = unique_preserving_order(product_labels + produced_products + consumed_products + fallback_names)
+    return all_products, produced_products, consumed_products
 
 
-def build_node_map(node_type: str, product_names: dict[str, str], product_to_plants: dict[str, list[str]]) -> dict[str, SupplyNode]:
+def build_node_map(
+    node_type: str,
+    product_names: dict[str, str],
+    product_to_plants: dict[str, list[str]],
+    node_to_produced_products: dict[str, list[str]],
+    node_to_consumed_products: dict[str, list[str]],
+) -> dict[str, SupplyNode]:
     nodes: dict[str, SupplyNode] = {}
     for item in query_index(SUPPLY_CHAIN_TABLE_NAME, "GSI1", "gsi1pk", node_type):
         node_id = item.get("pk", "")
         if not node_id:
             continue
+        all_products, produced_products, consumed_products = get_node_products(
+            item,
+            product_names,
+            product_to_plants,
+            node_to_produced_products,
+            node_to_consumed_products,
+        )
         nodes[node_id] = SupplyNode(
             node_id=node_id,
             node_type=node_type,
@@ -193,7 +305,9 @@ def build_node_map(node_type: str, product_names: dict[str, str], product_to_pla
             region=item.get("region", item.get("pref", "")),
             country=item.get("country", ""),
             keywords=build_node_keywords(item),
-            products=get_plant_products(item, product_names, product_to_plants) if node_type == "plant" else [],
+            products=all_products,
+            produced_products=produced_products,
+            consumed_products=consumed_products,
         )
     return nodes
 
@@ -217,22 +331,55 @@ def build_master_summary(context: SupplyChainContext) -> str:
     lines.append("[Tier1 suppliers]")
     for supplier_id, node in context.t1_suppliers.items():
         downstream = ", ".join(context.t1_to_plants.get(supplier_id, [])) or "-"
-        lines.append(f"- {supplier_id}: {node.name} / {node.region} / plants[{downstream}]")
+        products = ", ".join(node.products) if node.products else "-"
+        lines.append(f"- {supplier_id}: {node.name} / {node.region} / plants[{downstream}] / products[{products}]")
 
     lines.append("[Tier2 suppliers]")
     for supplier_id, node in context.t2_suppliers.items():
         t1_ids = ", ".join(context.t2_to_t1.get(supplier_id, [])) or "-"
         plant_ids = ", ".join(context.t2_to_plants.get(supplier_id, [])) or "-"
-        lines.append(f"- {supplier_id}: {node.name} / {node.region} / t1[{t1_ids}] / plants[{plant_ids}]")
+        products = ", ".join(node.products) if node.products else "-"
+        lines.append(f"- {supplier_id}: {node.name} / {node.region} / t1[{t1_ids}] / plants[{plant_ids}] / products[{products}]")
+
+    lines.append("[Products]")
+    for product_id, product_name in sorted(context.product_names.items()):
+        producer_nodes: list[str] = []
+        consumer_nodes: list[str] = []
+        for node in [*context.t1_suppliers.values(), *context.t2_suppliers.values(), *context.plants.values()]:
+            if product_name in node.produced_products:
+                producer_nodes.append(f"{node.node_id}:{node.name}")
+            if product_name in node.consumed_products:
+                consumer_nodes.append(f"{node.node_id}:{node.name}")
+        producer_text = ", ".join(producer_nodes[:4]) if producer_nodes else "-"
+        consumer_text = ", ".join(consumer_nodes[:4]) if consumer_nodes else "-"
+        lines.append(f"- {product_id}: {product_name} / producers[{producer_text}] / consumers[{consumer_text}]")
 
     return "\n".join(lines)
 
 
 def get_master_data() -> SupplyChainContext:
-    product_names, product_to_plants = build_product_records()
-    plants = build_node_map("plant", product_names, product_to_plants)
-    warehouses = build_node_map("warehouse", product_names, product_to_plants)
-    suppliers = build_node_map("supplier", product_names, product_to_plants)
+    product_names, product_to_plants, node_to_produced_products, node_to_consumed_products = build_product_records()
+    plants = build_node_map(
+        "plant",
+        product_names,
+        product_to_plants,
+        node_to_produced_products,
+        node_to_consumed_products,
+    )
+    warehouses = build_node_map(
+        "warehouse",
+        product_names,
+        product_to_plants,
+        node_to_produced_products,
+        node_to_consumed_products,
+    )
+    suppliers = build_node_map(
+        "supplier",
+        product_names,
+        product_to_plants,
+        node_to_produced_products,
+        node_to_consumed_products,
+    )
 
     t1_to_plants: dict[str, list[str]] = {}
     plant_to_t1: dict[str, list[str]] = {}
@@ -324,17 +471,38 @@ def match_supply_nodes(text: str, nodes: dict[str, SupplyNode]) -> list[dict[str
     matches: list[dict[str, Any]] = []
     for node in nodes.values():
         location_hits = find_keyword_hits(text, node.keywords)
-        product_hits = find_keyword_hits(text, node.products)
-        combined_hits = unique_preserving_order(location_hits + product_hits)
+        produced_product_hits = find_keyword_hits(text, node.produced_products)
+        consumed_product_hits = find_keyword_hits(text, node.consumed_products)
+        generic_product_hits = [
+            product
+            for product in find_keyword_hits(text, node.products)
+            if product not in produced_product_hits and product not in consumed_product_hits
+        ]
+        combined_hits = unique_preserving_order(location_hits + produced_product_hits + consumed_product_hits + generic_product_hits)
         if not combined_hits:
             continue
+
+        product_score = 0
+        if node.node_type == "supplier":
+            product_score += len(produced_product_hits) * 35
+            product_score += len(consumed_product_hits) * 18
+        elif node.node_type == "plant":
+            product_score += len(produced_product_hits) * 28
+            product_score += len(consumed_product_hits) * 20
+        else:
+            product_score += len(produced_product_hits) * 20
+            product_score += len(consumed_product_hits) * 15
+        product_score += len(generic_product_hits) * 16
+
         matches.append({
             "node_id": node.node_id,
             "node_type": node.node_type,
             "name": node.name,
             "matched_keywords": combined_hits,
-            "matched_products": product_hits,
-            "score": len(location_hits) * 15 + len(product_hits) * 25,
+            "matched_products": unique_preserving_order(produced_product_hits + consumed_product_hits + generic_product_hits),
+            "matched_produced_products": produced_product_hits,
+            "matched_consumed_products": consumed_product_hits,
+            "score": len(location_hits) * 15 + product_score,
         })
     return sorted(matches, key=lambda value: value["score"], reverse=True)
 
@@ -440,12 +608,27 @@ def format_reason(
         else:
             reasons.append(f"{risk_category['name']}として分類")
     if matched_plants:
-        reasons.append(f"工場一致: {', '.join(match['node_id'] for match in matched_plants[:3])}")
+        plant_reasons: list[str] = []
+        for match in matched_plants[:3]:
+            details: list[str] = [match["node_id"]]
+            if match["matched_produced_products"]:
+                details.append(f"produces[{', '.join(match['matched_produced_products'][:2])}]")
+            if match["matched_consumed_products"]:
+                details.append(f"consumes[{', '.join(match['matched_consumed_products'][:2])}]")
+            plant_reasons.append(" ".join(details))
+        reasons.append(f"工場一致: {', '.join(plant_reasons)}")
     if matched_warehouses:
         reasons.append(f"倉庫一致: {', '.join(match['node_id'] for match in matched_warehouses[:2])}")
-    supplier_ids = [match["node_id"] for match in (matched_t1[:2] + matched_t2[:2])]
-    if supplier_ids:
-        reasons.append(f"供給網一致: {', '.join(supplier_ids)}")
+    supplier_reasons: list[str] = []
+    for match in matched_t1[:2] + matched_t2[:2]:
+        details: list[str] = [match["node_id"]]
+        if match["matched_produced_products"]:
+            details.append(f"produces[{', '.join(match['matched_produced_products'][:2])}]")
+        if match["matched_consumed_products"]:
+            details.append(f"consumes[{', '.join(match['matched_consumed_products'][:2])}]")
+        supplier_reasons.append(" ".join(details))
+    if supplier_reasons:
+        reasons.append(f"供給網一致: {', '.join(supplier_reasons)}")
     return " / ".join(reasons) if reasons else "供給網との直接一致は弱く、監視継続レベル"
 
 
@@ -529,12 +712,13 @@ def build_stage2_result(item: dict[str, Any], text: str, context: SupplyChainCon
         "authenticity_score": authenticity_score,
         "impact_score": impact_score,
         "heuristic_score": total_score,
-        "ai_candidate": ENABLE_AI_CLASSIFICATION and bool(candidate_plants or candidate_t1 or candidate_t2 or candidate_paths),
+        "ai_candidate": ENABLE_AI_CLASSIFICATION,
     }
 
 
 def build_ai_payload(items: list[dict[str, Any]], context: SupplyChainContext) -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
+    product_catalog = sorted(context.product_names.values())
     for item in items:
         stage2 = item["stage2"]
         payload.append({
@@ -546,12 +730,14 @@ def build_ai_payload(items: list[dict[str, Any]], context: SupplyChainContext) -
             "event_text": build_item_text(item),
             "classification_hint": stage2["risk_category"]["name"],
             "classification_slug_hint": stage2["risk_category"]["slug"],
+            "product_catalog": product_catalog,
             "candidate_plants": stage2["candidate_plants"],
             "candidate_t1_suppliers": stage2["candidate_t1_suppliers"],
             "candidate_t2_suppliers": stage2["candidate_t2_suppliers"],
             "candidate_paths": stage2["candidate_paths"][:8],
             "authenticity_score": stage2["authenticity_score"],
             "impact_score": stage2["impact_score"],
+            "allow_indirect_inference": True,
         })
     return payload
 
@@ -587,6 +773,55 @@ def invoke_ai_classifier(items: list[dict[str, Any]], context: SupplyChainContex
     return {row["id"]: row for row in result.get("results", []) if row.get("id")}
 
 
+def reason_has_clear_supply_chain_rationale(reason: str) -> bool:
+    normalized = normalize_text(reason)
+    if not normalized:
+        return False
+    if "->" in reason:
+        return True
+    rationale_keywords = [
+        "物流",
+        "供給",
+        "調達",
+        "コスト",
+        "燃料",
+        "輸送",
+        "原料",
+        "素材",
+        "upstream",
+        "downstream",
+        "indirect",
+        "supplier",
+        "plant",
+    ]
+    if any(keyword.lower() in normalized for keyword in [normalize_text(word) for word in rationale_keywords]):
+        return True
+    if any(pattern.lower() in normalized for pattern in [normalize_text(word) for word in GENERIC_REASON_PATTERNS]):
+        return False
+    return len(normalized) >= 40
+
+
+def normalize_score_for_evidence(stage3: dict[str, Any]) -> dict[str, Any]:
+    impacted_plants = stage3.get("impacted_plants", [])
+    impacted_suppliers = stage3.get("impacted_suppliers", [])
+    has_impacted_nodes = bool(impacted_plants or impacted_suppliers)
+    score = int(stage3.get("score", 0))
+
+    if has_impacted_nodes:
+        stage3["score"] = max(score, 35 if stage3.get("used_ai") else score)
+        return stage3
+
+    if stage3.get("used_ai"):
+        if reason_has_clear_supply_chain_rationale(stage3.get("reason", "")):
+            stage3["score"] = min(score, 55)
+            return stage3
+        stage3["score"] = min(score, 25)
+        return stage3
+
+    stage3["score"] = min(score, 20)
+    return stage3
+
+
 def build_stage3_result(item: dict[str, Any], ai_result: dict[str, Any] | None) -> dict[str, Any]:
     stage2 = item["stage2"]
 
@@ -611,9 +846,9 @@ def build_stage3_result(item: dict[str, Any], ai_result: dict[str, Any] | None) 
     }
 
     if ai_result is None:
-        return base_result
+        return normalize_score_for_evidence(base_result)
 
-    return {
+    stage3 = {
         **base_result,
         "time": ai_result.get("time") or base_result["time"],
         "score": int(ai_result.get("score", base_result["score"])),
@@ -625,6 +860,7 @@ def build_stage3_result(item: dict[str, Any], ai_result: dict[str, Any] | None) 
         "classification_code": ai_result.get("classification_code") or base_result["classification_code"],
         "classification_slug": ai_result.get("classification_slug") or base_result["classification_slug"],
     }
+    return normalize_score_for_evidence(stage3)
 
 
 def determine_final_label(stage3: dict[str, Any]) -> str:
