@@ -181,6 +181,73 @@ def seed_products(table) -> None:
     print(f"  {len(data)}件")
 
 
+def seed_product_relations(table) -> None:
+    """製品の生産・消費関係（PRODUCES / CONSUMES）を投入"""
+    print("製品関係を投入中...")
+    # (node_id, edge_type, product_id)
+    data: list[tuple[str, str, str]] = [
+        # ── T2 Supplier（原材料生産） ──
+        ("SUP101", "produces", "PRD008"),  # シリコンウェハー九州 → シリコン原料
+        ("SUP102", "produces", "PRD009"),  # レアメタル北陸 → 銅線
+        ("SUP103", "produces", "PRD010"),  # 化学原料四国 → プラスチック筐体
+        # ── T1 Supplier（部品生産） ──
+        ("SUP001", "consumes", "PRD008"),  # 九州半導体 ← シリコン原料
+        ("SUP001", "produces", "PRD001"),  # 九州半導体 → 半導体チップA
+        ("SUP002", "produces", "PRD003"),  # 関西電子部品 → ディスプレイパネル
+        ("SUP003", "consumes", "PRD009"),  # 東北素材 ← 銅線
+        ("SUP003", "produces", "PRD002"),  # 東北素材 → 半導体チップB
+        ("SUP004", "consumes", "PRD009"),  # 北海道金属 ← 銅線
+        ("SUP004", "produces", "PRD009"),  # 北海道金属 → 銅線（精錬）
+        ("SUP005", "produces", "PRD004"),  # 沖縄部品供給 → バッテリーモジュール
+        ("SUP006", "consumes", "PRD010"),  # 中部精密機器 ← プラスチック筐体
+        ("SUP006", "produces", "PRD010"),  # 中部精密機器 → プラスチック筐体（加工）
+        ("SUP007", "produces", "PRD001"),  # 関東化学工業 → 半導体チップA
+        ("SUP007", "produces", "PRD006"),  # 関東化学工業 → センサーアセンブリ
+        # ── Plant（組立・加工） ──
+        ("PLT001", "consumes", "PRD001"),  # 東京組立 ← 半導体チップA
+        ("PLT001", "consumes", "PRD002"),  # 東京組立 ← 半導体チップB
+        ("PLT001", "consumes", "PRD003"),  # 東京組立 ← ディスプレイパネル
+        ("PLT001", "consumes", "PRD006"),  # 東京組立 ← センサーアセンブリ
+        ("PLT001", "produces", "PRD005"),  # 東京組立 → 制御ユニット
+        ("PLT002", "consumes", "PRD002"),  # 大阪製造 ← 半導体チップB
+        ("PLT002", "consumes", "PRD004"),  # 大阪製造 ← バッテリーモジュール
+        ("PLT002", "consumes", "PRD010"),  # 大阪製造 ← プラスチック筐体
+        ("PLT002", "produces", "PRD007"),  # 大阪製造 → 電源ユニット
+        ("PLT003", "consumes", "PRD003"),  # 名古屋電子 ← ディスプレイパネル
+        ("PLT003", "produces", "PRD003"),  # 名古屋電子 → ディスプレイパネル（検査済）
+        ("PLT004", "consumes", "PRD001"),  # 宮古島半導体 ← 半導体チップA
+        ("PLT004", "produces", "PRD001"),  # 宮古島半導体 → 半導体チップA（加工済）
+        ("PLT005", "consumes", "PRD004"),  # 那覇 ← バッテリーモジュール
+        ("PLT005", "produces", "PRD004"),  # 那覇 → バッテリーモジュール（検査済）
+        ("PLT006", "consumes", "PRD001"),  # 福岡組立 ← 半導体チップA
+        ("PLT006", "consumes", "PRD004"),  # 福岡組立 ← バッテリーモジュール
+        ("PLT006", "produces", "PRD005"),  # 福岡組立 → 制御ユニット
+        ("PLT007", "produces", "PRD002"),  # 広島部品 → 半導体チップB
+        ("PLT008", "consumes", "PRD002"),  # 仙台製造 ← 半導体チップB
+        ("PLT008", "consumes", "PRD009"),  # 仙台製造 ← 銅線
+        ("PLT008", "produces", "PRD002"),  # 仙台製造 → 半導体チップB（加工済）
+        ("PLT008", "produces", "PRD006"),  # 仙台製造 → センサーアセンブリ
+        ("PLT009", "consumes", "PRD006"),  # 横浜精密 ← センサーアセンブリ
+        ("PLT009", "produces", "PRD006"),  # 横浜精密 → センサーアセンブリ（精密加工済）
+        # ── Customer（消費のみ） ──
+        ("CUS001", "consumes", "PRD005"),  # トヨタ ← 制御ユニット
+        ("CUS002", "consumes", "PRD007"),  # パナソニック ← 電源ユニット
+        ("CUS003", "consumes", "PRD005"),  # 三菱重工 ← 制御ユニット
+        ("CUS004", "consumes", "PRD005"),  # ソニー ← 制御ユニット
+        ("CUS005", "consumes", "PRD006"),  # オリンパス ← センサーアセンブリ
+        ("CUS006", "consumes", "PRD007"),  # 川崎重工 ← 電源ユニット
+        ("CUS007", "consumes", "PRD005"),  # 日立 ← 制御ユニット
+        ("CUS008", "consumes", "PRD003"),  # デンソー ← ディスプレイパネル
+    ]
+    for node_id, edge_type, product_id in data:
+        sk_prefix = "PRODUCES" if edge_type == "produces" else "CONSUMES"
+        put(table, {
+            "pk": node_id, "sk": f"{sk_prefix}#{product_id}",
+            "edge_type": edge_type, "product_id": product_id,
+        })
+    print(f"  {len(data)}件")
+
+
 def seed_relations(table) -> None:
     """供給関係を投入"""
     print("供給関係を投入中...")
@@ -244,6 +311,7 @@ def main() -> None:
     seed_suppliers(table)
     seed_customers(table)
     seed_products(table)
+    seed_product_relations(table)
     seed_relations(table)
     print("\n投入完了!")
 
