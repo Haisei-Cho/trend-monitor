@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import boto3
+from botocore.client import BaseClient
 
 from utils import generate_s3_key, serialize_json
 from log_utils import setup_logger
@@ -76,6 +77,57 @@ def save_to_s3(items: list[dict[str, Any]], source: str) -> str:
     )
     logger.info(f"S3保存完了: s3://{BUCKET_NAME}/{s3_key}")
     return s3_key
+
+
+def load_json_from_s3(bucket_name: str, key: str, client: BaseClient | None = None) -> dict[str, Any]:
+    """S3上のJSONオブジェクトを読み込む。"""
+    active_client = client or s3_client
+    response = active_client.get_object(Bucket=bucket_name, Key=key)
+    body = response["Body"].read().decode("utf-8")
+    return json.loads(body)
+
+
+def save_json_to_s3(
+    data: dict[str, Any],
+    key: str,
+    bucket_name: str | None = None,
+    client: BaseClient | None = None,
+) -> str:
+    """JSONデータをS3に保存する。"""
+    active_client = client or s3_client
+    target_bucket = bucket_name or BUCKET_NAME
+    body = serialize_json(data)
+    active_client.put_object(
+        Bucket=target_bucket,
+        Key=key,
+        Body=body.encode("utf-8"),
+        ContentType="application/json",
+    )
+    logger.info(f"S3保存完了: s3://{target_bucket}/{key}")
+    return key
+
+
+def query_index(
+    table_name: str,
+    index_name: str,
+    partition_key_name: str,
+    partition_key_value: str,
+) -> list[dict]:
+    """任意の DynamoDB GSI をパーティションキー指定で全件取得する。"""
+    table = boto3.resource("dynamodb").Table(table_name)
+    items = []
+    params = {
+        "IndexName": index_name,
+        "KeyConditionExpression": f"{partition_key_name} = :t",
+        "ExpressionAttributeValues": {":t": partition_key_value},
+    }
+    while True:
+        resp = table.query(**params)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    return items
 
 
 def query_gsi1(table_name: str, gsi1pk: str) -> list[dict]:

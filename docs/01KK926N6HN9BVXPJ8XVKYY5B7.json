@@ -1,0 +1,241 @@
+{
+    "fetched_at": "2026-03-09T10:27:36.785285+00:00",
+    "source": "trends_route",
+    "item_count": 3,
+    "items": [
+        {
+            "trend_name": "京浜東北線",
+            "tweet_count": 10,
+            "screening_reason": "鉄道路線名のトレンド入りは運行障害・遅延・事故等の交通障害が発生している可能性があり、物流・通勤輸送への影響が考えられる",
+            "source": "trends_route",
+            "sample_tweets": [
+                {
+                    "id": "2030953379091144912",
+                    "text": "＃今日の人身事故②\n\n　   京浜東北線/東海道線\n\n　　　　　      🙇\n\n積極財政 消費税廃止を訴えていながらの自死だとしたら、やり過ごしてはいけないのでは？と思わずにはいられない。 https://t.co/4UnDVt82m2",
+                    "author_id": "1232570731419930624",
+                    "created_at": "2026-03-09T10:26:33.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 1,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 102
+                    }
+                },
+                {
+                    "id": "2030953333108924746",
+                    "text": "ただでさえ残業でイラッとしてんのに、京浜東北線遅延とか暴れていい？暴れていいよな？",
+                    "author_id": "335407458",
+                    "created_at": "2026-03-09T10:26:22.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 175
+                    }
+                },
+                {
+                    "id": "2030953311785160826",
+                    "text": "京浜東北線人身で遅れまくってるし！！！\n今日は大人しく帰ってればよかったクソ！！",
+                    "author_id": "559905785",
+                    "created_at": "2026-03-09T10:26:17.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 156
+                    }
+                },
+                {
+                    "id": "2030953169581470062",
+                    "text": "京浜東北線遅延しててうんちうんちうんち",
+                    "author_id": "1447009340494286848",
+                    "created_at": "2026-03-09T10:25:43.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 294
+                    }
+                },
+                {
+                    "id": "2030953158726554033",
+                    "text": "#爆裂おかわりしてる\n\n#LOLFanFest2026\n\n#افطار_العشر__الاواخر___بالحرم\n\n#ANN記者会見\n\n#正源司陽子ANNX\n\nkzさん\n\nクロスロード\n\nXavi\n\nタフグミ\n\n京浜東北線\n\nLaporta\n\nHobi\n\nLING NIVEA BRAND FRIEND\n\nTAKU INOUE\n\nポケミク\n\nイノタク\n\nあんステ\n\n一郎さん\n\nASH NEW HAIRKADA\n\nガソリン\n\n義ノ富士 https://t.co/HWOo18HVNi",
+                    "author_id": "17902013",
+                    "created_at": "2026-03-09T10:25:40.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 778
+                    }
+                }
+            ]
+        },
+        {
+            "trend_name": "ガソリン",
+            "tweet_count": 10,
+            "screening_reason": "燃料価格の急変動や供給不安に関連する可能性があり、物流コストや輸送インフラへの影響が考えられる",
+            "source": "trends_route",
+            "sample_tweets": [
+                {
+                    "id": "2030953588751757588",
+                    "text": "車買った途端なんかガソリン価格安くなてラッキーって思ったらバカの戦争で大高騰 ほんまカス",
+                    "author_id": "1254814140343873536",
+                    "created_at": "2026-03-09T10:27:23.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 0
+                    }
+                },
+                {
+                    "id": "2030953577712378129",
+                    "text": "湾岸戦争の時をよく知らないけど、調べてみると、その時は原油価格高騰で、ガソリン店頭販売価格が一時的に倍位に、この時は戦争の終結が比較的早かったので、すぐに元に戻ったらしい\n今回の高騰前で、平均が150円/L台だったと思うので、倍と考えるとかなりヤバい\n物価に直結するので生活できなくなる",
+                    "author_id": "1436682002279768065",
+                    "created_at": "2026-03-09T10:27:20.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 1
+                    }
+                },
+                {
+                    "id": "2030953574906425626",
+                    "text": "ガソリン！また！値上げしてた！！！\n2、3週間前になぜか5円あがったのにまた！4円も！🤯🤯🤯",
+                    "author_id": "407023073",
+                    "created_at": "2026-03-09T10:27:20.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 0
+                    }
+                },
+                {
+                    "id": "2030953540085239906",
+                    "text": "ガソリン価格やべぇな\n\nそもそもまだ仕入れ時は値上げ前のガソリンのはずなのにもう上げるの？！って感じだけど https://t.co/j8hrK93lh3",
+                    "author_id": "929953318306160640",
+                    "created_at": "2026-03-09T10:27:11.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 0
+                    }
+                },
+                {
+                    "id": "2030953536809578826",
+                    "text": "ガソリン代値上げの可能性ってマジかよ…\nドライブとか気軽に行けなくなるやん…https://t.co/OLWDMI79wn",
+                    "author_id": "1901966072120791040",
+                    "created_at": "2026-03-09T10:27:11.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 4
+                    }
+                }
+            ]
+        },
+        {
+            "trend_name": "東海道線",
+            "tweet_count": 10,
+            "screening_reason": "鉄道路線名のトレンド入りは運行障害・遅延・事故等の交通障害が発生している可能性があり、東海道線沿線の物流・サプライチェーンへの影響が考えられる",
+            "source": "trends_route",
+            "sample_tweets": [
+                {
+                    "id": "2030953596343484709",
+                    "text": "【横浜線 八王子方面 遅延情報】\n横浜線は、16:31頃、東海道線内での人身事故の影響で、東神奈川〜町田の下り･八王子方面行の一部列車に最大40分程度、町田〜八王子の下り･八王子方面行の一部列車に5分以上の遅れと運転変更\n\n飛び降り前の駅ホーム内映像⬇️\nhttps://t.co/kC8OhTGpza",
+                    "author_id": "3228190601",
+                    "created_at": "2026-03-09T10:27:25.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 2
+                    }
+                },
+                {
+                    "id": "2030953567381795024",
+                    "text": "【りんかい線 新木場方面 遅延情報】\nりんかい線は、16:31頃、JR東海道線内での人身事故・18:46頃、JR埼京線内での踏切内安全確認の影響で、大崎〜新木場の新木場方面行の一部列車に10分以上の遅れがでています。\n\n飛び降り前の駅ホーム内映像⬇️\nhttps://t.co/Hw1gpt9Gun",
+                    "author_id": "3228190601",
+                    "created_at": "2026-03-09T10:27:18.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 0
+                    }
+                },
+                {
+                    "id": "2030953538621431944",
+                    "text": "東海道線：『遅延』\n東海道線は、人身事故の影響で、東京〜品川駅間の上下線の一部列車に遅れがでています。 #東海道線\n\n飛び降り前の駅ホーム内映像⬇️\nhttps://t.co/vQ0LJXUW0c",
+                    "author_id": "3228190601",
+                    "created_at": "2026-03-09T10:27:11.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 2
+                    }
+                },
+                {
+                    "id": "2030953512952275404",
+                    "text": "16:31に起きた東海道線の事故により常磐線遅延中！\n全く🐮　＃JR東海道線　#上野東京ライン　＃常磐線　＃遅延",
+                    "author_id": "1506933333850144779",
+                    "created_at": "2026-03-09T10:27:05.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 7
+                    }
+                },
+                {
+                    "id": "2030953509596840198",
+                    "text": "【特急湘南 下り線 遅延情報】\n東海道線の通勤向け特急は、16:31頃、東海道線内での人身事故の影響で、以下の列車に遅れがでています。\n\n湘南1号 平塚行 30分以上 \n湘南3号 小田原行 15分以上 ＊始発駅出発前\n\n飛び降り前の駅ホーム内映像⬇️\nhttps://t.co/GGTP0NVr1a",
+                    "author_id": "3228190601",
+                    "created_at": "2026-03-09T10:27:04.000Z",
+                    "metrics": {
+                        "retweet_count": 0,
+                        "reply_count": 0,
+                        "like_count": 0,
+                        "quote_count": 0,
+                        "bookmark_count": 0,
+                        "impression_count": 46
+                    }
+                }
+            ]
+        }
+    ]
+}

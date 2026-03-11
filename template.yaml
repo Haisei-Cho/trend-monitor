@@ -142,8 +142,13 @@ Resources:
                 Resource:
                   - !GetAtt TrendTable.Arn
                   - !Sub ${TrendTable.Arn}/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/SupplyChainMaster
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/SupplyChainMaster/index/*
               - Effect: Allow
                 Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
+              - Effect: Allow
+                Action: s3:GetObject
                 Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
@@ -212,6 +217,39 @@ Resources:
             Schedule: rate(5 minutes)
             Enabled: false
 
+  # -----------------------------------------------------------
+  # Lambda: Classification Processor（raw S3 → 第2/3段階分類）
+  # -----------------------------------------------------------
+  ClassificationProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub classification-processor-${StageName}
+      Handler: classification_processor_function.lambda_handler
+      CodeUri: function/classification_processor/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+          STAGE: !Ref StageName
+          SUPPLY_CHAIN_TABLE_NAME: SupplyChainMaster
+          CLASSIFICATION_MODEL_ID: jp.anthropic.claude-sonnet-4-6
+          AI_BATCH_SIZE: "8"
+      Events:
+        RawObjectCreated:
+          Type: S3
+          Properties:
+            Bucket: !Ref TrendOutputBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: raw/
+                  - Name: suffix
+                    Value: .json
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -221,5 +259,7 @@ Outputs:
     Value: !GetAtt TrendFetcherFunction.Arn
   KeywordSearchArn:
     Value: !GetAtt KeywordSearchFunction.Arn
+  ClassificationProcessorArn:
+    Value: !GetAtt ClassificationProcessorFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic
