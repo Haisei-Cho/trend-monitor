@@ -23,6 +23,8 @@ pk / sk の2パターンだけ:
 | ノード | ID | `META` | `PLT001 / META` |
 | 関係 | 供給元 | `SUPPLIES_TO#供給先` | `SUP001 / SUPPLIES_TO#PLT004` |
 | 所在地 | 拠点ID | `LOCATED_AT#ロケーションID` | `PLT001 / LOCATED_AT#LOC001` |
+| 生産 | ノードID | `PRODUCES#製品ID` | `PLT001 / PRODUCES#PRD005` |
+| 消費 | ノードID | `CONSUMES#製品ID` | `PLT001 / CONSUMES#PRD001` |
 
 ## ノード種別（node_type）
 
@@ -48,6 +50,8 @@ pk / sk の2パターンだけ:
 |------|-----|-----|------|
 | SUPPLIES_TO | from_id | `SUPPLIES_TO#to_id` | 供給関係（全種別共通） |
 | LOCATED_AT | 拠点ID | `LOCATED_AT#LOC_ID` | 工場・倉庫の所在地 |
+| PRODUCES | ノードID | `PRODUCES#PRD_ID` | このノードが生産する製品 |
+| CONSUMES | ノードID | `CONSUMES#PRD_ID` | このノードが消費する製品 |
 
 SUPPLIES_TO の from_type / to_type の組み合わせ:
 
@@ -103,6 +107,8 @@ t2 = {sid for sid, targets in edges.items()
 | 工場の所在地 | `pk=PLT001, sk begins_with LOCATED_AT#` |
 | 下流チェーン | SUPPLIES_TO# を再帰的にたどる |
 | 上流チェーン | GSI2 逆引きを再帰的にたどる |
+| 拠点が生産する製品 | `pk=PLT001, sk begins_with PRODUCES#` |
+| 拠点が消費する製品 | `pk=PLT001, sk begins_with CONSUMES#` |
 
 ## 別テーブル: SupplyChainOrders（未実装）
 
