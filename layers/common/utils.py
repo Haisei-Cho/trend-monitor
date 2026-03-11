@@ -23,6 +23,23 @@ def generate_s3_key(date: datetime | None = None, ulid: str | None = None) -> st
     return f"raw/{date_str}/{ulid}.json"
 
 
+def generate_classified_s3_key(
+    category_id: str,
+    date: datetime | None = None,
+    ulid: str | None = None,
+) -> str:
+    """分類結果用S3キーを生成する。
+
+    形式: classified/{category_id}/{YYYY-MM-DD}/{ULID}.json
+    """
+    if date is None:
+        date = datetime.now(timezone.utc)
+    if ulid is None:
+        ulid = generate_ulid()
+    date_str = date.strftime("%Y-%m-%d")
+    return f"classified/{category_id}/{date_str}/{ulid}.json"
+
+
 def serialize_json(data: Any, ensure_ascii: bool = False) -> str:
     """PythonオブジェクトをJSON文字列に直列化する。"""
     return json.dumps(data, ensure_ascii=ensure_ascii)

@@ -94,3 +94,38 @@ def query_gsi1(table_name: str, gsi1pk: str) -> list[dict]:
             break
         params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
     return items
+
+
+def query_sc_gsi1(table_name: str, gsi1pk: str) -> list[dict]:
+    """SupplyChainMasterテーブル用GSI1クエリ（小文字キー、ページネーション対応）。"""
+    table = boto3.resource("dynamodb").Table(table_name)
+    items = []
+    params = {
+        "IndexName": "GSI1",
+        "KeyConditionExpression": "gsi1pk = :t",
+        "ExpressionAttributeValues": {":t": gsi1pk},
+    }
+    while True:
+        resp = table.query(**params)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    return items
+
+
+def query_sc_by_pk(table_name: str, pk: str, sk_prefix: str) -> list[dict]:
+    """SupplyChainMasterテーブル用PKクエリ（sk begins_with、ページネーション対応）。"""
+    table = boto3.resource("dynamodb").Table(table_name)
+    items = []
+    params = {
+        "KeyConditionExpression": "pk = :pk AND begins_with(sk, :prefix)",
+        "ExpressionAttributeValues": {":pk": pk, ":prefix": sk_prefix},
+    }
+    while True:
+        resp = table.query(**params)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    return items

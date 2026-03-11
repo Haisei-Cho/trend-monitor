@@ -25,6 +25,9 @@ Parameters:
   SearchMaxResults:
     Type: String
     Default: "10"
+  SupplyChainMasterTableName:
+    Type: String
+    Default: SupplyChainMaster
 
 Resources:
   # -----------------------------------------------------------
@@ -38,10 +41,17 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
       LifecycleConfiguration:
         Rules:
           - Id: ExpireRawData
             Prefix: raw/
+            Status: Enabled
+            ExpirationInDays: 90
+          - Id: ExpireClassifiedData
+            Prefix: classified/
             Status: Enabled
             ExpirationInDays: 90
 
@@ -143,8 +153,17 @@ Resources:
                   - !GetAtt TrendTable.Arn
                   - !Sub ${TrendTable.Arn}/index/*
               - Effect: Allow
-                Action: s3:PutObject
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
                 Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SupplyChainMasterTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SupplyChainMasterTableName}/index/*
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}-*
@@ -212,6 +231,40 @@ Resources:
             Schedule: rate(5 minutes)
             Enabled: false
 
+  # -----------------------------------------------------------
+  # Lambda: Category Classifier（カテゴリ分類）
+  # -----------------------------------------------------------
+  CategoryClassifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub category-classifier-${StageName}
+      Handler: category_classifier_function.lambda_handler
+      CodeUri: function/category_classifier/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          SC_TABLE_NAME: !Ref SupplyChainMasterTableName
+          BUCKET_NAME: !Ref TrendOutputBucket
+          STAGE: !Ref StageName
+      Events:
+        S3Event:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - !Ref TrendOutputBucket
+                object:
+                  key:
+                    - prefix: raw/
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -221,5 +274,7 @@ Outputs:
     Value: !GetAtt TrendFetcherFunction.Arn
   KeywordSearchArn:
     Value: !GetAtt KeywordSearchFunction.Arn
+  CategoryClassifierArn:
+    Value: !GetAtt CategoryClassifierFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic
