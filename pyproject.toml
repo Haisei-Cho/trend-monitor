@@ -5,6 +5,7 @@ description = "SCMリスク監視システム - X APIトレンド・キーワー
 requires-python = ">=3.13"
 dependencies = [
     "aws-lambda-powertools[all]>=3.25.0",
+    "beautifulsoup4>=4.14.3",
     "boto3>=1.42.63",
     "botocore[crt]>=1.42.63",
     "pydantic>=2.0",
