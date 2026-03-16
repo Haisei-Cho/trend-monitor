@@ -54,6 +54,10 @@ Resources:
             Prefix: classified/
             Status: Enabled
             ExpirationInDays: 90
+          - Id: ExpireFactsData
+            Prefix: facts/
+            Status: Enabled
+            ExpirationInDays: 7
 
   # -----------------------------------------------------------
   # DynamoDB Table（Single Table Design）
@@ -265,6 +269,30 @@ Resources:
                   key:
                     - prefix: raw/
 
+  # -----------------------------------------------------------
+  # Lambda: JMA Collector（気象庁データ収集 - 地震・津波）
+  # -----------------------------------------------------------
+  JmaCollectorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub jma-collector-${StageName}
+      Handler: jma_collector_function.lambda_handler
+      CodeUri: function/jma_collector/
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: false
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -276,5 +304,7 @@ Outputs:
     Value: !GetAtt KeywordSearchFunction.Arn
   CategoryClassifierArn:
     Value: !GetAtt CategoryClassifierFunction.Arn
+  JmaCollectorArn:
+    Value: !GetAtt JmaCollectorFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic

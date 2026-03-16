@@ -19,7 +19,7 @@
                 収集層
   ┌──────────────────────────────────────────────────────────┐
   │                                                          │
-  │  EventBridge(1分) ──▶ JmaCollector ──▶ S3 facts/jma/     │
+  │  EventBridge(5分) ──▶ JmaCollector ──▶ S3 facts/jma/     │
   │  EventBridge(10分) ──▶ NewsCollector ──▶ DynamoDB FACT#   │
   │  EventBridge(5分) ──▶ OfficialCollector ──▶ DynamoDB FACT#│
   │                                                          │
@@ -56,16 +56,16 @@
 
 ### ■ 基本仕様
 
-| 項目 | 内容 |
-|------|------|
-| Lambda関数名 | `jma-collector-{stage}` |
+| 項目 | 内容                                      |
+|------|-----------------------------------------|
+| Lambda関数名 | `jma-collector-{stage}`                 |
 | ハンドラ | `jma_collector_function.lambda_handler` |
-| 実行間隔 | 1分 |
-| 外部API | 気象庁 bosai JSON API（非公式・無認証・無料） |
-| 出力先 | S3 `facts/jma/latest/` |
-| 追加依存 | なし（urllib + json のみ） |
-| タイムアウト | 30秒 |
-| メモリ | 256MB |
+| 実行間隔 | 5分                                      |
+| 外部API | 気象庁 bosai JSON API（非公式・無認証・無料）          |
+| 出力先 | S3 `facts/jma/latest/`                  |
+| 追加依存 | なし（urllib + json のみ）                    |
+| タイムアウト | 300秒                                    |
+| メモリ | 256MB                                   |
 
 ### ■ 取得対象
 
