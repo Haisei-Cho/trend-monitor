@@ -3,7 +3,7 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "trend-monitor"
+stack_name = "trend-monitor-dev"
 region = "ap-northeast-1"
 
 [default.build.parameters]
