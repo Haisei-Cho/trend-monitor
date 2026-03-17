@@ -205,9 +205,10 @@ Resources:
                   - !Sub ${TrendTable.Arn}/index/*
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource: !Sub arn:aws:s3:::${TrendOutputBucket}/*
+                  - s3:*
+                Resource:
+                  - !Sub arn:aws:s3:::${TrendOutputBucket}
+                  - !Sub arn:aws:s3:::${TrendOutputBucket}/*
               - Effect: Allow
                 Action:
                   - dynamodb:Query
@@ -373,6 +374,30 @@ Resources:
             Schedule: rate(5 minutes)
             Enabled: false
 
+  # -----------------------------------------------------------
+  # Lambda: News Collector（Google News RSS ニュース収集）
+  # -----------------------------------------------------------
+  NewsCollectorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub news-collector-${StageName}
+      Handler: news_collector_function.lambda_handler
+      CodeUri: function/news_collector/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 1
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+          TABLE_NAME: !Ref TrendTable
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Enabled: false
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -390,5 +415,7 @@ Outputs:
     Value: !Ref RoadwayTrafficTable
   RoadwayCollectorArn:
     Value: !GetAtt RoadwayCollectorFunction.Arn
+  NewsCollectorArn:
+    Value: !GetAtt NewsCollectorFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic
