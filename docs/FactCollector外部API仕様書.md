@@ -16,14 +16,14 @@ EventBridge (5分) ──▶ OfficialCollector  ──▶ S3 facts/official/
 
 | カテゴリ       | JmaCollector | NewsCollector | OfficialCollector |
 |---------------|:---:|:---:|:---:|
-| earthquake    | ✅ | ✅ | ✅ |
-| flood         | ✅ | ✅ | ✅ |
-| fire          | ❌ | ✅ | ⚠️ (@FDMA_JAPAN) |
-| traffic       | ❌ | ✅ | ✅ (@NEXCO, @JR各社) |
-| infra         | ❌ | ✅ | ✅ (@TEPCO等) |
-| labor         | ❌ | ✅ | ❌ |
-| geopolitics   | ❌ | ✅ | ❌ |
-| pandemic      | ❌ | ✅ | ⚠️ (厚労省) |
+| earthquake    | ✅ | ✅ | ✅ (@UN_NERV, @JMA_kishou 等) |
+| flood         | ✅ | ✅ | ✅ (@JMA_kishou, @MLIT_river 等) |
+| fire          | ❌ | ✅ | ✅ (@FDMA_JAPAN, @Tokyo_Fire_D) |
+| traffic       | ❌ | ✅ | ✅ (@JREast_official, @JRCentral_OFL, @NEXCO各社) |
+| infra         | ❌ | ✅ | ✅ (@TEPCOPG, @KANDEN_souhai 等) |
+| labor         | ❌ | ✅ | ⚠️ (@meti_NIPPON, @MHLWitter) |
+| geopolitics   | ❌ | ✅ | ⚠️ (@MofaJapan_jp, @meti_NIPPON) |
+| pandemic      | ❌ | ✅ | ✅ (@MHLWitter, @JIHS_JP) |
 
 ---
 
@@ -668,9 +668,9 @@ Authorization: Bearer {BEARER_TOKEN}
 #### OfficialCollector の消費見積
 
 ```
-監視アカウント: 約20件 → 1クエリで収まる (約300文字)
+監視アカウント: 23件 → 1クエリで収まる (約477文字、512文字制限内)
 実行間隔: 5分 → 15分あたり 3リクエスト
-月間読取: 20アカウント × 平均5件/回 × 288回/日 × 30日 ≈ 864,000件
+月間読取: 23アカウント × 平均3件/回 × 288回/日 × 30日 ≈ 597,600件（Pro tier 1M上限の60%）
 ```
 
 ### 3-4. 検索クエリ設計
@@ -678,53 +678,83 @@ Authorization: Bearer {BEARER_TOKEN}
 #### from: オペレータによるクエリ構築
 
 ```
-(from:UN_NERV OR from:JMA_bousai OR from:Kantei_Saigai OR from:FDMA_JAPAN
- OR from:CAO_BOUSAI OR from:c_nexco OR from:e_nexco OR from:w_nexco_info
- OR from:JRCentral_jp OR from:MLIT_JAPAN OR from:OfficialTEPCO
- OR from:KepcoOfficial OR from:tokyo_bousai OR from:osaka_bousai)
- lang:ja
+(from:UN_NERV OR from:JMA_kishou OR from:JMA_bousai OR from:Kantei_Saigai
+ OR from:FDMA_JAPAN OR from:CAO_BOUSAI OR from:Tokyo_Fire_D
+ OR from:JREast_official OR from:JRCentral_OFL OR from:e_nexco_bousai
+ OR from:w_nexco_news OR from:MLIT_JAPAN OR from:MLIT_river
+ OR from:TEPCOPG OR from:KANDEN_souhai OR from:Official_Chuden
+ OR from:TH_nw_official OR from:tokyo_bousai OR from:osaka_bousai
+ OR from:meti_NIPPON OR from:MofaJapan_jp OR from:MHLWitter
+ OR from:JIHS_JP)
+ lang:ja -is:retweet
 ```
 
-※ 512文字を超える場合はクエリ分割（既存 build_query パターン踏襲）
+※ 現在 23アカウント・約477文字（512文字制限に35文字の余裕）。
+※ 512文字を超える場合は `build_official_queries()` が自動分割しループ実行する。
+※ アカウントは DynamoDB `OFFICIAL_ACCT#*` マスタで管理（§3-9 参照）。
 
-### 3-5. 監視対象アカウント一覧
+### 3-5. 監視対象アカウント一覧（23件）
 
-#### 防災・気象（最優先）
+#### 横断・防災・気象
 
 | アカウント | 名称 | 投稿内容 | 対応カテゴリ |
 |-----------|------|---------|------------|
-| `@UN_NERV` | 特務機関NERV防災 | 気象庁データを自動投稿、速報性最高 | earthquake, flood |
-| `@JMA_bousai` | 気象庁防災情報 | 気象警報・地震・津波・火山の公式発表 | earthquake, flood |
-| `@Kantei_Saigai` | 首相官邸（災害・危機管理） | 政府の災害対応、避難指示 | 全カテゴリ |
-| `@FDMA_JAPAN` | 総務省消防庁 | 大規模災害の被害状況、消防活動 | earthquake, flood, fire |
-| `@CAO_BOUSAI` | 内閣府防災 | 防災政策、避難情報、被害情報 | 全カテゴリ |
+| `@UN_NERV` | 特務機関NERV防災 | 気象庁専用線接続・国内最速級の防災速報 | earthquake, flood |
+| `@JMA_kishou` | 気象庁 | 地震・津波・気象警報の一次情報源 | earthquake, flood |
+| `@JMA_bousai` | 気象庁防災情報 | 防災気象情報専用アカウント | earthquake, flood |
+| `@Kantei_Saigai` | 首相官邸（災害・危機管理） | 政府の大規模災害対応・避難指示 | 全カテゴリ |
+| `@FDMA_JAPAN` | 総務省消防庁 | 大規模災害の被害状況・消防活動 | earthquake, flood, fire |
+| `@CAO_BOUSAI` | 内閣府防災 | 防災政策・避難情報・被害情報 | 全カテゴリ |
+
+#### 火災・爆発
+
+| アカウント | 名称 | 投稿内容 | 対応カテゴリ |
+|-----------|------|---------|------------|
+| `@Tokyo_Fire_D` | 東京消防庁 | 関東エリアの火災・救急情報 | fire |
 
 #### 交通インフラ
 
 | アカウント | 名称 | 投稿内容 | 対応カテゴリ |
 |-----------|------|---------|------------|
-| `@c_nexco` | NEXCO中日本 | 高速道路通行止め・規制 | traffic |
-| `@e_nexco` | NEXCO東日本 | 東日本エリア高速道路情報 | traffic |
-| `@w_nexco_info` | NEXCO西日本 | 西日本エリア高速道路情報 | traffic |
-| `@JRCentral_jp` | JR東海【公式】 | 東海道新幹線・在来線の運行情報 | traffic |
+| `@JREast_official` | JR東日本（公式） | 東北・関東の鉄道運行情報 | traffic |
+| `@JRCentral_OFL` | JR東海News | 東海道新幹線・東海エリア運行情報 | traffic |
+| `@e_nexco_bousai` | NEXCO東日本（道路防災） | 災害時の高速道路通行止め情報 | traffic |
+| `@w_nexco_news` | NEXCO西日本 | 西日本エリア高速道路情報 | traffic |
 | `@MLIT_JAPAN` | 国土交通省 | 道路・河川・港湾等の総合情報 | traffic, flood |
+| `@MLIT_river` | 国土交通省 水管理・国土保全 | 河川水位・洪水予報の専門情報 | flood |
 
 #### 電力・インフラ
 
 | アカウント | 名称 | 投稿内容 | 対応カテゴリ |
 |-----------|------|---------|------------|
-| `@OfficialTEPCO` | 東京電力パワーグリッド | 停電情報、復旧情報 | infra |
-| `@KepcoOfficial` | 関西電力 | 停電・復旧情報 | infra |
-| `@Official_CHUDEN` | 中部電力 | 停電・復旧情報 | infra |
+| `@TEPCOPG` | 東京電力パワーグリッド | 関東エリア停電情報・復旧情報 | infra |
+| `@KANDEN_souhai` | 関西電力送配電 | 関西エリア停電情報・復旧情報 | infra |
+| `@Official_Chuden` | 中部電力 | 中部エリア停電・復旧情報 | infra |
+| `@TH_nw_official` | 東北電力ネットワーク | 東北エリア停電情報・復旧情報 | infra |
 
-#### 自治体防災（拠点所在地に応じて選定）
+#### 自治体防災
 
-| アカウント | 名称 | 備考 |
-|-----------|------|------|
-| `@tokyo_bousai` | 東京都防災 | 東京エリア拠点向け |
-| `@osaka_bousai` | 大阪府危機管理室 | 関西エリア拠点向け |
+| アカウント | 名称 | 投稿内容 | 対応カテゴリ |
+|-----------|------|---------|------------|
+| `@tokyo_bousai` | 東京都防災 | 東京エリアの防災・避難情報 | earthquake, flood |
+| `@osaka_bousai` | おおさか防災ネット（大阪府） | 関西エリアの防災・避難情報 | earthquake, flood |
 
-※ アカウント名は変更される場合があるため、運用開始前に最新情報を確認すること。
+#### 労務・操業リスク／地政学・貿易
+
+| アカウント | 名称 | 投稿内容 | 対応カテゴリ |
+|-----------|------|---------|------------|
+| `@meti_NIPPON` | 経済産業省 | 輸出規制・操業制限・産業政策 | labor, geopolitics |
+| `@MofaJapan_jp` | 外務省 | 制裁・渡航情報・貿易摩擦の公式発表 | geopolitics |
+
+#### 感染症
+
+| アカウント | 名称 | 投稿内容 | 対応カテゴリ |
+|-----------|------|---------|------------|
+| `@MHLWitter` | 厚生労働省 | 感染症対策・労務安全衛生 | pandemic, labor |
+| `@JIHS_JP` | 国立健康危機管理研究機構 | 国内感染症サーベイランス（旧NIID、2025年再編） | pandemic |
+
+※ アカウント名・usernameは変更される場合がある。DynamoDB の `enabled` フラグで無効化対応。
+※ NEXCO中日本は今回スコープ外。必要に応じて `@c_nexco_tokyo` / `@c_nexco_nagoya` / `@c_nexco_kana` を追加可能。
 
 ### 3-6. 増分取得 (since_id)
 
@@ -782,19 +812,63 @@ facts/official/{date}/
 ### 3-8. xdk ライブラリでの呼び出し（既存パターン）
 
 ```python
-# 既存の keyword_search_function.py と同じパターン
-first_page = next(client.posts.search_recent(
-    query='(from:UN_NERV OR from:JMA_bousai OR ...) lang:ja',
-    since_id=last_newest_id,       # DynamoDB から取得
-    max_results=100,
-    tweet_fields=["created_at", "author_id", "text", "public_metrics"],
-    expansions=["author_id"],       # ユーザー名を展開
-    user_fields=["username", "name"],
-))
+# build_official_queries() でクエリ構築 → 複数クエリをループ実行
+queries = build_official_queries(usernames)   # utils.py の新関数
+
+for query in queries:
+    first_page = next(client.posts.search_recent(
+        query=query,                   # (from:A OR from:B ...) lang:ja -is:retweet
+        since_id=last_newest_id,       # DynamoDB から取得
+        max_results=100,
+        tweet_fields=["created_at", "author_id", "text", "public_metrics"],
+        expansions=["author_id"],      # ユーザー名を展開
+        user_fields=["username", "name"],
+    ))
+
+    tweets += first_page.data or []
+    # newest_id の最大値を次回の since_id として保存
 
 tweets = first_page.data or []
 meta = first_page.meta              # newest_id, oldest_id, result_count
 users = first_page.includes.users   # 展開されたユーザー情報
+```
+
+### 3-9. DynamoDB アカウントマスタ設計
+
+アカウントリストはハードコードせず DynamoDB で管理する。
+
+#### キーパターン
+
+| キー | 値 |
+|------|-----|
+| PK | `OFFICIAL_ACCT#{username}` |
+| SK | `META` |
+| GSI1PK | `TYPE#OFFICIAL_ACCT` |
+| GSI1SK | `#{username}` |
+
+#### 属性
+
+| 属性名 | 型 | 説明 |
+|---|---|---|
+| `username` | string | X ハンドル（`@` なし、例: `UN_NERV`） |
+| `displayName` | string | 表示名（例: `特務機関NERV防災`） |
+| `description` | string | 投稿内容の説明 |
+| `categories` | list | 対応カテゴリ（分類ラベル用途。例: `["earthquake", "flood"]`） |
+| `priorityGroup` | string | グループ分類（disaster / fire / traffic / infra / local / labor / geopolitics / pandemic） |
+| `enabled` | bool | 有効フラグ（アカウント凍結・改名時に `false` に更新） |
+| `addedAt` | string | 登録日時（ISO 8601） |
+
+#### アクセスパターン
+
+| 用途 | クエリ |
+|------|--------|
+| 全有効アカウント取得（クエリ構築時） | GSI1 `TYPE#OFFICIAL_ACCT` → Lambda で `enabled=true` フィルタ |
+| 個別アカウント取得・更新 | PK `OFFICIAL_ACCT#{username}` |
+
+#### シードスクリプト
+
+```bash
+python scripts/seed_official_account_master.py <テーブル名>
 ```
 
 ---
@@ -824,9 +898,9 @@ users = first_page.includes.users   # 展開されたユーザー情報
 | データソース | 状態 | 代替手段 |
 |------------|------|---------|
 | JARTIC (道路交通情報) | APIなし、スクレイピング規約違反 | NewsCollector + OfficialCollector で対応 |
-| NEXCO各社 | 正式APIなし、内部JSON不安定 | OfficialCollector (@c_nexco等) で対応 |
+| NEXCO各社 | 正式APIなし、内部JSON不安定 | OfficialCollector (@e_nexco_bousai, @w_nexco_news 等) で対応 |
 | VICS | 法人契約のみ、高額 | 対象外 |
-| 各電力会社 停電情報 | 正式APIなし、内部JSON不安定 | OfficialCollector (@OfficialTEPCO等) で対応 |
+| 各電力会社 停電情報 | 正式APIなし、内部JSON不安定 | OfficialCollector (@TEPCOPG, @KANDEN_souhai 等) で対応 |
 | 国土交通省 xROAD | 開発中、要調査 | 将来的に JmaCollector に追加可能 |
 
 ---

@@ -200,6 +200,8 @@ Resources:
                 Action:
                   - dynamodb:Query
                   - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
                 Resource:
                   - !GetAtt TrendTable.Arn
                   - !Sub ${TrendTable.Arn}/index/*
@@ -398,6 +400,31 @@ Resources:
             Schedule: rate(30 minutes)
             Enabled: false
 
+  # -----------------------------------------------------------
+  # Lambda: OfficialCollector（X API 公式アカウント監視）
+  # -----------------------------------------------------------
+  OfficialCollectorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub official-collector-${StageName}
+      Handler: official_collector_function.lambda_handler
+      CodeUri: function/official_collector/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 1
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+          TABLE_NAME: !Ref TrendTable
+          SECRET_NAME: !Ref SecretName
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: false
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -417,5 +444,7 @@ Outputs:
     Value: !GetAtt RoadwayCollectorFunction.Arn
   NewsCollectorArn:
     Value: !GetAtt NewsCollectorFunction.Arn
+  OfficialCollectorArn:
+    Value: !GetAtt OfficialCollectorFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic

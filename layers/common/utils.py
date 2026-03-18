@@ -56,6 +56,51 @@ def build_search_suffix(exclude_keywords: list[str] | None = None) -> str:
     return " ".join(parts)
 
 
+def build_official_queries(usernames: list[str]) -> list[str]:
+    """
+    公式アカウント監視用 from: クエリを構築する。
+    512文字を超える場合はアカウントを分割して複数クエリを返す。
+
+    Returns:
+        list[str]: 512文字以内のクエリリスト（形式: (from:A OR from:B ...) lang:ja -is:retweet）
+
+    Raises:
+        ValueError: usernamesが空の場合
+    """
+    if not usernames:
+        raise ValueError("アカウントリストは少なくとも1つ必要です")
+
+    suffix = "lang:ja -is:retweet"
+    items = [f"from:{u}" for u in usernames]
+
+    single = "(" + " OR ".join(items) + ") " + suffix
+    if len(single) <= X_API_QUERY_MAX_LENGTH:
+        return [single]
+
+    # 分割: "(" + content + ") " + suffix
+    overhead = 1 + 2 + len(suffix)  # "(" + ") " = 3文字
+    max_content = X_API_QUERY_MAX_LENGTH - overhead
+
+    chunks: list[list[str]] = []
+    chunk: list[str] = []
+    length = 0
+
+    for item in items:
+        added = len(item) if not chunk else len(item) + 4  # " OR " = 4文字
+        if length + added > max_content and chunk:
+            chunks.append(chunk)
+            chunk = [item]
+            length = len(item)
+        else:
+            chunk.append(item)
+            length += added
+
+    if chunk:
+        chunks.append(chunk)
+
+    return ["(" + " OR ".join(c) + ") " + suffix for c in chunks]
+
+
 def build_query(
     risk_keywords: list[str],
     site_keywords: list[str],

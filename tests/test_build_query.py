@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-from common.utils import build_query
+from common.utils import build_query, build_official_queries
 from scripts.seed_keyword_master import get_all_items
 
 # X API クエリ上限
@@ -187,6 +187,66 @@ class TestBuildQueryOutput:
             print(f"\n■ {name}（{cat_id}）— {len(queries)}クエリ")
             for i, q in enumerate(queries):
                 print(f"  [{i + 1}] {len(q)}文字: {q}")
+
+
+class TestBuildOfficialQueries:
+    """build_official_queries の動作検証"""
+
+    SAMPLE_USERNAMES = [
+        "UN_NERV", "JMA_kishou", "JMA_bousai", "Kantei_Saigai",
+        "FDMA_JAPAN", "CAO_BOUSAI",
+    ]
+
+    def test_single_query_within_limit(self):
+        queries = build_official_queries(self.SAMPLE_USERNAMES)
+        assert len(queries) == 1
+        assert len(queries[0]) <= 512
+
+    def test_query_contains_from_operators(self):
+        queries = build_official_queries(self.SAMPLE_USERNAMES)
+        for username in self.SAMPLE_USERNAMES:
+            assert f"from:{username}" in queries[0]
+
+    def test_query_contains_suffix(self):
+        queries = build_official_queries(self.SAMPLE_USERNAMES)
+        assert "lang:ja" in queries[0]
+        assert "-is:retweet" in queries[0]
+
+    def test_empty_list_raises(self):
+        with pytest.raises(ValueError):
+            build_official_queries([])
+
+    def test_split_when_exceeds_512(self):
+        # 512文字を超えるよう長いusernameを大量に作る
+        long_usernames = [f"VeryLongAccountUsername{i:03d}" for i in range(30)]
+        queries = build_official_queries(long_usernames)
+        assert len(queries) > 1
+        for q in queries:
+            assert len(q) <= 512
+            assert "lang:ja" in q
+            assert "-is:retweet" in q
+
+    def test_all_usernames_covered_after_split(self):
+        long_usernames = [f"VeryLongAccountUsername{i:03d}" for i in range(30)]
+        queries = build_official_queries(long_usernames)
+        combined = " ".join(queries)
+        for u in long_usernames:
+            assert f"from:{u}" in combined
+
+    def test_full_seed_accounts_within_limit(self):
+        """実際の23アカウントが512文字以内に収まること"""
+        seed_usernames = [
+            "UN_NERV", "JMA_kishou", "JMA_bousai", "Kantei_Saigai",
+            "FDMA_JAPAN", "CAO_BOUSAI", "Tokyo_Fire_D",
+            "JREast_official", "JRCentral_OFL", "e_nexco_bousai",
+            "w_nexco_news", "MLIT_JAPAN", "MLIT_river",
+            "TEPCOPG", "KANDEN_souhai", "Official_Chuden", "TH_nw_official",
+            "tokyo_bousai", "osaka_bousai",
+            "meti_NIPPON", "MofaJapan_jp", "MHLWitter", "JIHS_JP",
+        ]
+        queries = build_official_queries(seed_usernames)
+        assert len(queries) == 1
+        assert len(queries[0]) <= 512
 
 
 if __name__ == "__main__":
