@@ -123,14 +123,15 @@ def collect_tweets(client: Client, usernames: list[str], since_id: str | None) -
             first_page = next(client.posts.search_recent(**kwargs))
 
             # ユーザー情報を収集
-            for user in (first_page.includes or {}).get("users") or []:
+            includes = first_page.includes or {}
+            for user in includes.get("users") or []:
                 user_map[user.get("id", "")] = user
 
             tweets = first_page.data or []
             meta = first_page.meta or {}
 
-            if meta.get("newest_id"):
-                newest_ids.append(meta["newest_id"])
+            if meta and meta.newest_id:
+                newest_ids.append(meta.newest_id)
 
             for tw in tweets:
                 author_id = tw.get("author_id", "")
