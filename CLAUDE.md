@@ -44,9 +44,19 @@ trend-monitor/
 - **template.yaml の Handler**: `{機能名}_function.lambda_handler`
 - **シンプルさ優先**: 不要な抽象化・過剰なエラーハンドリングは追加しない
 
-## DynamoDB設計 (Single Table)
+## DynamoDB設計 (3テーブル構成)
 
-### テーブル: TrendTable
+全テーブル共通キー命名: `PK/SK/GSI1PK/GSI1SK/GSI2PK/GSI2SK` (大文字)
+
+### テーブル一覧
+
+| テーブル | 用途 | 外部連携 |
+|----------|------|----------|
+| TrendTable | マスタデータ・カーソル管理（内部専用） | なし |
+| RoadwayTrafficTable | 交通規制情報（Stream→FactChecker連携） | 外部参照あり |
+| EventTable | リスクイベント管理（最終出力） | 外部参照あり |
+
+### TrendTable (内部専用)
 
 | キー | 用途 |
 |------|------|
@@ -55,7 +65,7 @@ trend-monitor/
 | GSI2 (GSI2PK/GSI2SK) | 時系列・カテゴリ別検索 |
 | TTL (`ttl`) | イベントデータの自動削除 |
 
-### マスタデータ キーパターン
+#### マスタデータ キーパターン
 
 | エンティティ | PK | SK | GSI1PK | GSI1SK |
 |---|---|---|---|---|
@@ -63,6 +73,22 @@ trend-monitor/
 | キーワード | `KW#{keyword}` | `CAT#{category_id}` | `TYPE#KEYWORD` | `CAT#{category_id}` |
 | 除外ルール | `EXCLUSION#{rule_id}` | `META` | `TYPE#EXCLUSION` | `#{rule_id}` |
 | 拠点 | `SITE#{site_id}` | `META` | `TYPE#SITE` | `SITE_TYPE#{type}#{site_id}` |
+| 公式アカウント | `OFFICIAL#{account}` | `META` | `TYPE#OFFICIAL_ACCT` | `#{account}` |
+| カーソル | `CURSOR#{route}` | `META` | - | - |
+
+### RoadwayTrafficTable (外部連携あり・DynamoDB Streams有効)
+
+| エンティティ | PK | SK | GSI1PK | GSI1SK | GSI2PK | GSI2SK |
+|---|---|---|---|---|---|---|
+| 道路マスタ | `ROAD#{road_id}` | `META` | `PREF#{pref_id}` | `ROAD#{road_id}` | - | - |
+| 規制イベント(ACTIVE) | `ROAD#{road_id}` | `EVENT#{ts}#{dir}` | `PREF#{pref_id}` | `EVENT#{ts}` | `ACTIVE` | `PREF#{pref_id}#ROAD#{road_id}` |
+| 規制イベント(解除済) | `ROAD#{road_id}` | `EVENT#{ts}#{dir}` | `PREF#{pref_id}` | `EVENT#{ts}` | *(削除)* | *(削除)* |
+
+### EventTable (外部連携あり)
+
+| エンティティ | PK | SK | GSI1PK | GSI1SK | GSI2PK | GSI2SK |
+|---|---|---|---|---|---|---|
+| リスクイベント | `EVT#{event_id}` | `META` | `STATUS#{status}` | `{created_at}` | `CAT#{category}` | `{created_at}` |
 
 ## キーワード設計
 

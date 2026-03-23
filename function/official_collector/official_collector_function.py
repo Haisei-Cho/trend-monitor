@@ -181,7 +181,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
     s3_key = save_to_s3(tweets, since_id, newest_id)
 
-    if newest_id and len(tweets) > 0:
+    if newest_id:
         save_cursor(newest_id)
 
     output = {

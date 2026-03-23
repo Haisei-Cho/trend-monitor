@@ -13,11 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-from common.utils import build_query, build_official_queries
+from common.utils import build_query, build_official_queries, X_API_QUERY_MAX_LENGTH
 from scripts.seed_keyword_master import get_all_items
-
-# X API クエリ上限
-X_API_QUERY_MAX_LENGTH = 1024
 
 
 # ──────────────────────────────────────────────
@@ -135,7 +132,7 @@ class TestBuildQueryAllCategories:
                 )
 
     def test_all_queries_within_length_limit_full_sites(self, master_data):
-        """全拠点KWを使用した場合も1024文字以内に収まること"""
+        """全拠点KWを使用した場合もX_API_QUERY_MAX_LENGTH以内に収まること"""
         risk_kw, site_kw, exc_kw = master_data
 
         for cat_id, keywords in risk_kw.items():

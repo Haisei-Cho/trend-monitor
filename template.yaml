@@ -54,8 +54,8 @@ Resources:
             Prefix: classified/
             Status: Enabled
             ExpirationInDays: 90
-          - Id: ExpireFactsData
-            Prefix: facts/
+          - Id: ExpireFactsOfficial
+            Prefix: facts/official/
             Status: Enabled
             ExpirationInDays: 7
 
@@ -114,38 +114,87 @@ Resources:
     Properties:
       TableName: !Sub roadway-traffic-${StageName}
       BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
       AttributeDefinitions:
-        - AttributeName: pk
+        - AttributeName: PK
           AttributeType: S
-        - AttributeName: sk
+        - AttributeName: SK
           AttributeType: S
-        - AttributeName: gsi1pk
+        - AttributeName: GSI1PK
           AttributeType: S
-        - AttributeName: gsi1sk
+        - AttributeName: GSI1SK
           AttributeType: S
-        - AttributeName: gsi2pk
+        - AttributeName: GSI2PK
           AttributeType: S
-        - AttributeName: gsi2sk
+        - AttributeName: GSI2SK
           AttributeType: S
       KeySchema:
-        - AttributeName: pk
+        - AttributeName: PK
           KeyType: HASH
-        - AttributeName: sk
+        - AttributeName: SK
           KeyType: RANGE
       GlobalSecondaryIndexes:
         - IndexName: GSI1
           KeySchema:
-            - AttributeName: gsi1pk
+            - AttributeName: GSI1PK
               KeyType: HASH
-            - AttributeName: gsi1sk
+            - AttributeName: GSI1SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
         - IndexName: GSI2
           KeySchema:
-            - AttributeName: gsi2pk
+            - AttributeName: GSI2PK
               KeyType: HASH
-            - AttributeName: gsi2sk
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # -----------------------------------------------------------
+  # DynamoDB Table（EventTable - リスクイベント管理）
+  # -----------------------------------------------------------
+  EventTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub event-table-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -238,6 +287,23 @@ Resources:
                   - !Sub ${RoadwayTrafficTable.Arn}/index/*
               - Effect: Allow
                 Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt EventTable.Arn
+                  - !Sub ${EventTable.Arn}/index/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource:
+                  - !Sub ${RoadwayTrafficTable.Arn}/stream/*
+              - Effect: Allow
+                Action:
                   - aws-marketplace:Subscribe
                   - aws-marketplace:Unsubscribe
                   - aws-marketplace:ViewSubscriptions
@@ -309,7 +375,6 @@ Resources:
         - !Ref CommonLayer
       Environment:
         Variables:
-          SC_TABLE_NAME: !Ref SupplyChainMasterTableName
           BUCKET_NAME: !Ref TrendOutputBucket
           STAGE: !Ref StageName
       Events:
@@ -425,6 +490,112 @@ Resources:
             Schedule: rate(5 minutes)
             Enabled: false
 
+  # -----------------------------------------------------------
+  # Lambda: NodeIndexGenerator（ノードインデックス生成 - 日次）
+  # -----------------------------------------------------------
+  NodeIndexGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub node-index-generator-${StageName}
+      Handler: node_index_generator_function.lambda_handler
+      CodeUri: function/node_index_generator/
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          SC_TABLE_NAME: !Ref SupplyChainMasterTableName
+          BUCKET_NAME: !Ref TrendOutputBucket
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 17 * * ? *)
+            Description: 日次ノードインデックス更新（JST 02:00）
+            Enabled: false
+
+  # -----------------------------------------------------------
+  # Lambda: FactChecker（ファクトチェック・リスクイベント判定）
+  # -----------------------------------------------------------
+  FactCheckerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fact-checker-${StageName}
+      Handler: fact_checker_function.lambda_handler
+      CodeUri: function/fact_checker/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+          EVENT_TABLE_NAME: !Ref EventTable
+          ROADWAY_TABLE_NAME: !Ref RoadwayTrafficTable
+          STAGE: !Ref StageName
+      Events:
+        ClassifiedS3Event:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - !Ref TrendOutputBucket
+                object:
+                  key:
+                    - prefix: classified/
+        FactsS3Event:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - !Ref TrendOutputBucket
+                object:
+                  key:
+                    - prefix: facts/
+
+  # -----------------------------------------------------------
+  # Lambda: RoadwayFactChecker（交通規制→リスクイベント判定）
+  # -----------------------------------------------------------
+  RoadwayFactCheckerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub roadway-fact-checker-${StageName}
+      Handler: roadway_fact_checker_function.lambda_handler
+      CodeUri: function/roadway_fact_checker/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref TrendOutputBucket
+          EVENT_TABLE_NAME: !Ref EventTable
+          STAGE: !Ref StageName
+      Events:
+        RoadwayStreamsEvent:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt RoadwayTrafficTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumRetryAttempts: 3
+            BisectBatchOnFunctionError: true
+            FilterCriteria:
+              Filters:
+                - Pattern: '{"eventName": ["INSERT"]}'
+
 Outputs:
   TrendTableName:
     Value: !Ref TrendTable
@@ -446,5 +617,13 @@ Outputs:
     Value: !GetAtt NewsCollectorFunction.Arn
   OfficialCollectorArn:
     Value: !GetAtt OfficialCollectorFunction.Arn
+  EventTableName:
+    Value: !Ref EventTable
+  FactCheckerArn:
+    Value: !GetAtt FactCheckerFunction.Arn
+  RoadwayFactCheckerArn:
+    Value: !GetAtt RoadwayFactCheckerFunction.Arn
+  NodeIndexGeneratorArn:
+    Value: !GetAtt NodeIndexGeneratorFunction.Arn
   NotificationTopicArn:
     Value: !Ref NotificationTopic

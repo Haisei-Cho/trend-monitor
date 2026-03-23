@@ -111,7 +111,7 @@ def get_active_regulations(table) -> dict:
     regs = {}
     query_kwargs = {
         "IndexName": "GSI2",
-        "KeyConditionExpression": "gsi2pk = :active",
+        "KeyConditionExpression": "GSI2PK = :active",
         "ExpressionAttributeValues": {":active": "ACTIVE"},
     }
     while True:
@@ -127,7 +127,7 @@ def get_active_regulations(table) -> dict:
 
 def _regulation_key(reg: dict) -> str:
     """規制の同一性判定キーを生成する。"""
-    road_id = reg.get("pk", "").replace("ROAD#", "") if "pk" in reg else reg.get("road_id", "")
+    road_id = reg.get("PK", "").replace("ROAD#", "") if "PK" in reg else reg.get("road_id", "")
     return f"{road_id}#{reg.get('direction', '')}#{reg.get('section', '')}#{reg.get('regulation_type', '')}"
 
 
@@ -169,9 +169,20 @@ def parse_regulations(html: str) -> dict:
         if match:
             now = datetime.now(JST)
             month, day, hour, minute = (int(x) for x in match.groups())
-            fetched_at = now.replace(
-                month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0
-            ).isoformat()
+            try:
+                parsed = now.replace(
+                    month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0
+                )
+                # 年跨ぎ対応
+                if parsed > now + timedelta(hours=1):
+                    # 未来すぎる → 前年に調整 (例: 1/1 00:10に12/31をパース)
+                    parsed = parsed.replace(year=parsed.year - 1)
+                elif now - parsed > timedelta(days=1):
+                    # 過去すぎる → 翌年に調整 (例: 12/31 23:00に1/1をパース)
+                    parsed = parsed.replace(year=parsed.year + 1)
+                fetched_at = parsed.isoformat()
+            except ValueError:
+                logger.warning(f"日付パース失敗: {month}月{day}日 {hour}時{minute}分 → 現在時刻をフォールバック")
             break
 
     # 方向別の規制情報を抽出
@@ -286,12 +297,12 @@ def save_new_regulation(table, reg: dict) -> None:
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%S")
 
     item = {
-        "pk": f"ROAD#{road_id}",
-        "sk": f"EVENT#{timestamp}#{direction}",
-        "gsi1pk": f"PREF#{pref_id}",
-        "gsi1sk": f"EVENT#{timestamp}",
-        "gsi2pk": "ACTIVE",
-        "gsi2sk": f"PREF#{pref_id}#ROAD#{road_id}",
+        "PK": f"ROAD#{road_id}",
+        "SK": f"EVENT#{timestamp}#{direction}",
+        "GSI1PK": f"PREF#{pref_id}",
+        "GSI1SK": f"EVENT#{timestamp}",
+        "GSI2PK": "ACTIVE",
+        "GSI2SK": f"PREF#{pref_id}#ROAD#{road_id}",
         "road_name": reg.get("road_name", ""),
         "pref_id": pref_id,
         "pref_name": reg.get("pref_name", ""),
@@ -312,8 +323,8 @@ def clear_regulation(table, item: dict) -> None:
     """規制解除をDynamoDBに反映する。"""
     now = datetime.now(JST).isoformat()
     table.update_item(
-        Key={"pk": item["pk"], "sk": item["sk"]},
-        UpdateExpression="SET cleared_at = :cleared REMOVE gsi2pk, gsi2sk",
+        Key={"PK": item["PK"], "SK": item["SK"]},
+        UpdateExpression="SET cleared_at = :cleared REMOVE GSI2PK, GSI2SK",
         ExpressionAttributeValues={":cleared": now},
     )
     logger.info(

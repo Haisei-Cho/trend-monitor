@@ -98,7 +98,7 @@ def fetch_keyword_hits(
                         "created_at": tw.get("created_at", ""),
                         "metrics": tw.get("public_metrics", {}),
                     }
-                    for tw in tweets[:5]
+                    for tw in tweets[:10]
                 ]
                 label = f"[KW] {category_id}" if len(queries) == 1 else f"[KW] {category_id}#{qi + 1}"
                 hits.append({

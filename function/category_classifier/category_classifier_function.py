@@ -1,11 +1,11 @@
 """カテゴリ分類 Lambda関数。
 
 S3イベントトリガーで起動し、raw JSONを読み込み、
-SupplyChainMasterテーブルを参照してサプライチェーン関連メッセージを分類・要約する。
+S3ノードインデックスキャッシュを参照してサプライチェーン関連メッセージを分類・要約する。
 
 処理フロー:
     1. S3からraw JSONを読み込み
-    2. SupplyChainMasterから工場・倉庫・サプライヤーを取得しTier算出
+    2. S3からノードインデックス（config/node_location_index.json）を読み込み
     3. itemsを10件ずつバッチ分割
     4. Bedrock AIでノードマッチング+分類を一括実行
     5. 分類結果をS3に保存（classified/{category}/{date}/{ulid}.json）
@@ -13,7 +13,6 @@ SupplyChainMasterテーブルを参照してサプライチェーン関連メッ
 
 import json
 import os
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,15 +22,14 @@ from aws_lambda_powertools.utilities.data_classes import (
     event_source,
 )
 
-from aws_utils import query_sc_gsi1, query_sc_by_pk
 from log_utils import setup_logger
 from utils import generate_classified_s3_key, generate_ulid, serialize_json
 
 logger = setup_logger("category_classifier")
 
-SC_TABLE_NAME = os.environ["SC_TABLE_NAME"]
 BUCKET_NAME = os.environ["BUCKET_NAME"]
 BEDROCK_MODEL_ID = "jp.anthropic.claude-sonnet-4-6"
+NODE_INDEX_S3_KEY = "config/node_location_index.json"
 
 s3_client = boto3.client("s3")
 bedrock_runtime = boto3.client("bedrock-runtime")
@@ -92,6 +90,41 @@ infra: 停電・インフラ障害, labor: 労務・操業リスク, geopolitics
 """
 
 
+def _extract_json_array(text: str) -> list[dict] | None:
+    """テキストからJSON配列を抽出する（ブラケットカウント方式）。"""
+    start = text.find("[")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if c == "\\":
+            escape_next = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    result = json.loads(text[start:i + 1])
+                    return result if isinstance(result, list) else None
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def build_system_prompt(nodes: list[dict]) -> str:
     """ノード一覧を含むsystem promptを動的に構築する。"""
     node_lines = []
@@ -119,82 +152,23 @@ def load_s3_data(bucket: str, key: str) -> dict[str, Any]:
     return json.loads(body)
 
 
-def get_supply_chain_nodes(sc_table_name: str) -> dict[str, Any]:
-    """SupplyChainMasterから工場・倉庫・サプライヤーを取得しTier算出する。
+def load_node_index(bucket: str) -> list[dict[str, Any]]:
+    """S3からノードインデックスを読み込む。
+
+    NodeIndexGenerator Lambda が日次生成する config/node_location_index.json を読み込む。
 
     Returns:
-        {"nodes": [{"id": "PLT001", "name": "東京組立工場", "node_type": "plant", "tier": None, "location_name": "...", "products": [...]}, ...]}
+        ノードリスト [{"id": "PLT001", "name": "...", "node_type": "plant", ...}, ...]
     """
-    # ノード取得
-    plants = query_sc_gsi1(sc_table_name, "plant")
-    warehouses = query_sc_gsi1(sc_table_name, "warehouse")
-    suppliers = query_sc_gsi1(sc_table_name, "supplier")
+    try:
+        data = load_s3_data(bucket, NODE_INDEX_S3_KEY)
+    except s3_client.exceptions.NoSuchKey:
+        logger.error(f"ノードインデックス未生成: s3://{bucket}/{NODE_INDEX_S3_KEY}")
+        return []
 
-    # 全サプライヤーのSUPPLIES_TO関係を取得してTier算出
-    all_supplier_ids = {s["pk"] for s in suppliers}
-    edges: dict[str, list[str]] = {}
-    for sid in all_supplier_ids:
-        relations = query_sc_by_pk(sc_table_name, sid, "SUPPLIES_TO#")
-        edges[sid] = [r["to_id"] for r in relations]
-
-    # T1: Plantに直接供給するSupplier
-    t1 = {sid for sid, targets in edges.items()
-           if any(t.startswith("PLT") for t in targets)}
-    # T2: T1に供給するSupplier
-    t2 = {sid for sid, targets in edges.items()
-           if any(t in t1 for t in targets) and sid not in t1}
-
-    # ノードリスト構築
-    nodes: list[dict[str, Any]] = []
-
-    for p in plants:
-        nodes.append({
-            "id": p["pk"], "name": p.get("name", ""),
-            "node_type": "plant", "tier": None,
-        })
-
-    for w in warehouses:
-        nodes.append({
-            "id": w["pk"], "name": w.get("name", ""),
-            "node_type": "warehouse", "tier": None,
-        })
-
-    for s in suppliers:
-        sid = s["pk"]
-        tier = "T1" if sid in t1 else "T2" if sid in t2 else None
-        # T2以上のみ監視対象（tierがNone=T3以降は除外）
-        if tier is None:
-            continue
-        nodes.append({
-            "id": sid, "name": s.get("name", ""),
-            "node_type": "supplier", "tier": tier,
-        })
-
-    # 工場・倉庫の所在地名をノードに追加（system prompt で使用）
-    for item in plants + warehouses:
-        loc_name = item.get("location_name", "")
-        node = next((n for n in nodes if n["id"] == item["pk"]), None)
-        if node:
-            node["location_name"] = loc_name
-
-    # 製品マスタ取得（ID→名称マッピング）
-    products = query_sc_gsi1(sc_table_name, "product")
-    product_map = {p["pk"]: p.get("name", "") for p in products}
-
-    # 各ノードのPRODUCES関係を取得
-    for node in nodes:
-        produces = query_sc_by_pk(sc_table_name, node["id"], "PRODUCES#")
-        node["products"] = [
-            product_map.get(p["product_id"], p["product_id"])
-            for p in produces
-        ]
-
-    logger.info(
-        f"サプライチェーンノード取得: 工場={len(plants)}, 倉庫={len(warehouses)}, "
-        f"T1={len(t1)}, T2={len(t2)}, 監視対象ノード={len(nodes)}"
-    )
-
-    return {"nodes": nodes}
+    nodes = data.get("nodes", [])
+    logger.info(f"ノードインデックス読込完了: {len(nodes)}ノード（generated_at={data.get('generated_at', 'unknown')}）")
+    return nodes
 
 
 
@@ -242,16 +216,10 @@ def classify_batch(
     body = json.loads(response["body"].read())
     text = body["content"][0]["text"].strip()
 
-    # JSON配列を抽出
-    match = re.search(r"\[.*]", text, re.DOTALL)
-    if not match:
+    # JSON配列を抽出（ブラケットカウント方式でネスト対応）
+    results = _extract_json_array(text)
+    if results is None:
         logger.warning(f"Bedrockレスポンス解析失敗: {text[:200]}")
-        return []
-
-    try:
-        results = json.loads(match.group())
-    except json.JSONDecodeError:
-        logger.warning(f"BedrockレスポンスJSON解析失敗: {text[:200]}")
         return []
 
     # related_node_idsを完全なnode dictに変換
@@ -300,9 +268,11 @@ def lambda_handler(event: S3EventBridgeNotificationEvent, context: Any) -> dict:
         logger.info("itemsが空のため処理スキップ")
         return {"classified_count": 0}
 
-    # 2. SupplyChainMasterからノードデータ取得
-    sc_data = get_supply_chain_nodes(SC_TABLE_NAME)
-    nodes = sc_data["nodes"]
+    # 2. S3からノードインデックスを読み込み
+    nodes = load_node_index(bucket)
+    if not nodes:
+        logger.warning("ノードインデックスが空のため分類スキップ")
+        return {"classified_count": 0}
     node_map = {n["id"]: n for n in nodes}
 
     # 3. system prompt構築（ノード一覧を含む）
@@ -328,8 +298,8 @@ def lambda_handler(event: S3EventBridgeNotificationEvent, context: Any) -> dict:
                 continue
 
             # 元のitemからtrend_nameを取得
-            item_index = result.get("item_index", i)
-            original_item = items[item_index] if item_index < len(items) else {}
+            item_index = result.get("item_index", -1)
+            original_item = items[item_index] if 0 <= item_index < len(items) else {}
 
             now = datetime.now(timezone.utc)
             classified_data = {

@@ -3,6 +3,7 @@
 Secrets Manager, S3, DynamoDB など AWS サービスの共通操作を提供する。
 """
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone, timedelta
@@ -78,6 +79,41 @@ def save_to_s3(items: list[dict[str, Any]], source: str) -> str:
     return s3_key
 
 
+def save_if_changed(bucket: str, key: str, data: dict) -> bool:
+    """内容が変更された場合のみS3に保存する。
+
+    fetched_at を除外したハッシュで同一性を判定し、
+    変更がない場合は書き込みをスキップして EventBridge の不要な発火を防ぐ。
+
+    Returns:
+        True=書き込み実行, False=変更なしスキップ
+    """
+    hash_target = {k: v for k, v in data.items() if k != "fetched_at"}
+    content_hash = hashlib.md5(
+        json.dumps(hash_target, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
+
+    try:
+        head = s3_client.head_object(Bucket=bucket, Key=key)
+        existing_hash = head.get("Metadata", {}).get("content-hash", "")
+        if existing_hash == content_hash:
+            logger.info(f"変更なし、スキップ: s3://{bucket}/{key}")
+            return False
+    except Exception:
+        pass
+
+    body = json.dumps(data, ensure_ascii=False)
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=body.encode("utf-8"),
+        ContentType="application/json",
+        Metadata={"content-hash": content_hash},
+    )
+    logger.info(f"S3保存完了(変更あり): s3://{bucket}/{key}")
+    return True
+
+
 def query_gsi1(table_name: str, gsi1pk: str) -> list[dict]:
     """GSI1PK指定でDynamoDBから全件取得（ページネーション対応）。"""
     table = boto3.resource("dynamodb").Table(table_name)
@@ -96,36 +132,3 @@ def query_gsi1(table_name: str, gsi1pk: str) -> list[dict]:
     return items
 
 
-def query_sc_gsi1(table_name: str, gsi1pk: str) -> list[dict]:
-    """SupplyChainMasterテーブル用GSI1クエリ（小文字キー、ページネーション対応）。"""
-    table = boto3.resource("dynamodb").Table(table_name)
-    items = []
-    params = {
-        "IndexName": "GSI1",
-        "KeyConditionExpression": "gsi1pk = :t",
-        "ExpressionAttributeValues": {":t": gsi1pk},
-    }
-    while True:
-        resp = table.query(**params)
-        items.extend(resp.get("Items", []))
-        if "LastEvaluatedKey" not in resp:
-            break
-        params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-    return items
-
-
-def query_sc_by_pk(table_name: str, pk: str, sk_prefix: str) -> list[dict]:
-    """SupplyChainMasterテーブル用PKクエリ（sk begins_with、ページネーション対応）。"""
-    table = boto3.resource("dynamodb").Table(table_name)
-    items = []
-    params = {
-        "KeyConditionExpression": "pk = :pk AND begins_with(sk, :prefix)",
-        "ExpressionAttributeValues": {":pk": pk, ":prefix": sk_prefix},
-    }
-    while True:
-        resp = table.query(**params)
-        items.extend(resp.get("Items", []))
-        if "LastEvaluatedKey" not in resp:
-            break
-        params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-    return items

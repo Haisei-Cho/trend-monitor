@@ -24,7 +24,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["layers/common", "function/trend_fetcher", "function/keyword_search"]
+pythonpath = ["layers/common", "function/trend_fetcher", "function/keyword_search", "function/fact_checker", "function/roadway_fact_checker"]
 
 [tool.ruff]
 target-version = "py313"
@@ -34,4 +34,4 @@ line-length = 120
 select = ["E", "F", "I", "W"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["utils", "aws_utils", "log_utils"]
+known-first-party = ["utils", "aws_utils", "log_utils", "fact_matcher"]

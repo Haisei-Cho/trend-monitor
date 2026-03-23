@@ -19,7 +19,7 @@ from typing import Any
 
 import boto3
 
-from aws_utils import query_gsi1
+from aws_utils import query_gsi1, save_if_changed
 from log_utils import setup_logger
 
 logger = setup_logger("news_collector")
@@ -214,8 +214,12 @@ def merge_and_deduplicate(
     return merged[:MAX_ARTICLES_PER_CATEGORY]
 
 
-def save_to_s3(articles: list[dict], category: str, s3_key: str) -> None:
-    """記事データをS3に保存する。"""
+def save_to_s3(articles: list[dict], category: str, s3_key: str) -> bool:
+    """記事データをS3に保存する。内容変更時のみ書き込む。
+
+    Returns:
+        True=書き込み実行, False=変更なしスキップ
+    """
     data = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": "google_news",
@@ -223,14 +227,7 @@ def save_to_s3(articles: list[dict], category: str, s3_key: str) -> None:
         "article_count": len(articles),
         "articles": articles,
     }
-    body = json.dumps(data, ensure_ascii=False)
-    s3_client.put_object(
-        Bucket=BUCKET_NAME,
-        Key=s3_key,
-        Body=body.encode("utf-8"),
-        ContentType="application/json",
-    )
-    logger.info(f"S3保存完了: s3://{BUCKET_NAME}/{s3_key} ({len(articles)}件)")
+    return save_if_changed(BUCKET_NAME, s3_key, data)
 
 
 def lambda_handler(event: dict, context: Any) -> dict:
@@ -286,10 +283,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
         existing = load_existing_articles(s3_key)
         merged = merge_and_deduplicate(existing, new_articles)
 
-        # S3保存
-        save_to_s3(merged, category, s3_key)
-        results[category] = f"saved ({len(new_articles)} new, {excluded} excluded, {len(merged)} total)"
-        logger.info(f"取得完了: {category} → 新規{len(new_articles)}件, 除外{excluded}件, 合計{len(merged)}件")
+        # S3保存（内容変更時のみ）
+        changed = save_to_s3(merged, category, s3_key)
+        status = "saved" if changed else "unchanged"
+        results[category] = f"{status} ({len(new_articles)} new, {excluded} excluded, {len(merged)} total)"
+        logger.info(f"取得完了: {category} → 新規{len(new_articles)}件, 除外{excluded}件, 合計{len(merged)}件 ({status})")
 
         if i < len(categories) - 1:
             time.sleep(REQUEST_INTERVAL)

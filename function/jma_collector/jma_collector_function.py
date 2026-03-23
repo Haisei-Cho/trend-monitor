@@ -11,6 +11,7 @@ from typing import Any
 
 import boto3
 
+from aws_utils import save_if_changed
 from log_utils import setup_logger
 
 logger = setup_logger("jma_collector")
@@ -68,22 +69,19 @@ def fetch_jma_data(url: str) -> list | dict | None:
         return None
 
 
-def save_fact_to_s3(raw_data: list | dict, data_type: str, s3_key: str) -> None:
-    """ラッパーで包んでS3に保存する。"""
+def save_fact_to_s3(raw_data: list | dict, data_type: str, s3_key: str) -> bool:
+    """ラッパーで包んでS3に保存する。内容変更時のみ書き込む。
+
+    Returns:
+        True=書き込み実行, False=変更なしスキップ
+    """
     wrapped = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": "jma",
         "data_type": data_type,
         "raw_data": raw_data,
     }
-    body = json.dumps(wrapped, ensure_ascii=False)
-    s3_client.put_object(
-        Bucket=BUCKET_NAME,
-        Key=s3_key,
-        Body=body.encode("utf-8"),
-        ContentType="application/json",
-    )
-    logger.info(f"S3保存完了: s3://{BUCKET_NAME}/{s3_key}")
+    return save_if_changed(BUCKET_NAME, s3_key, wrapped)
 
 
 def lambda_handler(event: dict, context: Any) -> dict:
@@ -109,9 +107,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
             continue
 
         item_count = len(raw_data) if isinstance(raw_data, list) else 1
-        save_fact_to_s3(raw_data, data_type, s3_key)
-        results[data_type] = f"saved ({item_count} items)"
-        logger.info(f"取得完了: {data_type} → {item_count}件")
+        changed = save_fact_to_s3(raw_data, data_type, s3_key)
+        status = "saved" if changed else "unchanged"
+        results[data_type] = f"{status} ({item_count} items)"
+        logger.info(f"取得完了: {data_type} → {item_count}件 ({status})")
 
     output = {
         "source": "jma_collector",
